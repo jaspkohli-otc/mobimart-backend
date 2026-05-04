@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  VENDOR
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+enum ProductCondition {
+  NEW
+  LIKE_NEW
+  GOOD
+  FAIR
+}
+
+model User {
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(CUSTOMER)
+  phone        String?
+  createdAt    DateTime   @default(now())
+
+  vendor       Vendor?
+  cartItems    CartItem[]
+  orders       Order[]
+  reviews      Review[]
+}
+
+model Vendor {
+  id             String    @id @default(uuid())
+  userId         String    @unique
+  storeName      String
+  description    String?
+  logoUrl        String?
+  isVerified     Boolean   @default(false)
+  commissionRate Float     @default(0.10)
+  createdAt      DateTime  @default(now())
+
+  user           User         @relation(fields: [userId], references: [id])
+  products       Product[]
+  orderItems     OrderItem[]
+}
+
+model Category {
+  id       String     @id @default(uuid())
+  name     String
+  slug     String     @unique
+  parentId String?
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  products Product[]
+}
+
+model Product {
+  id          String    @id @default(uuid())
+  vendorId    String
+  categoryId  String
+  name        String
+  description String
+  price       Float
+  stockQty    Int       @default(0)
+  images      Json      @default("[]")
+  isActive    Boolean   @default(true)
+  condition   ProductCondition @default(NEW)
+  avgRating   Float     @default(0)
+  createdAt   DateTime  @default(now())
+
+  vendor      Vendor      @relation(fields: [vendorId], references: [id])
+  category    Category    @relation(fields: [categoryId], references: [id])
+  cartItems   CartItem[]
+  orderItems  OrderItem[]
+  reviews     Review[]
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String
+  quantity  Int      @default(1)
+  addedAt   DateTime @default(now())
+
+  user      User    @relation(fields: [userId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@unique([userId, productId])
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  userId          String
+  totalAmount     Float
+  status          OrderStatus @default(PENDING)
+  shippingAddress Json
+  paymentRef      String?
+  createdAt       DateTime    @default(now())
+
+  user        User        @relation(fields: [userId], references: [id])
+  orderItems  OrderItem[]
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  productId String
+  vendorId  String
+  quantity  Int
+  unitPrice Float
+
+  order   Order   @relation(fields: [orderId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+  vendor  Vendor  @relation(fields: [vendorId], references: [id])
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([userId, productId])
+}
