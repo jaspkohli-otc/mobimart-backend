@@ -20,11 +20,17 @@ enum OrderStatus {
   DELIVERED
   CANCELLED
 }
+
 enum ProductCondition {
   NEW
   LIKE_NEW
   GOOD
   FAIR
+}
+
+enum PayoutStatus {
+  PENDING
+  PAID
 }
 
 model User {
@@ -50,11 +56,13 @@ model Vendor {
   logoUrl        String?
   isVerified     Boolean   @default(false)
   commissionRate Float     @default(0.10)
+  ibanNumber     String?
   createdAt      DateTime  @default(now())
 
   user           User         @relation(fields: [userId], references: [id])
   products       Product[]
   orderItems     OrderItem[]
+  payouts        Payout[]
 }
 
 model Category {
@@ -69,21 +77,21 @@ model Category {
 }
 
 model Product {
-  id          String    @id @default(uuid())
+  id          String           @id @default(uuid())
   vendorId    String
-  categoryId  String
+  categoryId  String?
   name        String
   description String
   price       Float
-  stockQty    Int       @default(0)
-  images      Json      @default("[]")
-  isActive    Boolean   @default(true)
+  stockQty    Int              @default(0)
+  images      Json             @default("[]")
+  isActive    Boolean          @default(true)
   condition   ProductCondition @default(NEW)
-  avgRating   Float     @default(0)
-  createdAt   DateTime  @default(now())
+  avgRating   Float            @default(0)
+  createdAt   DateTime         @default(now())
 
   vendor      Vendor      @relation(fields: [vendorId], references: [id])
-  category    Category    @relation(fields: [categoryId], references: [id])
+  category    Category?   @relation(fields: [categoryId], references: [id])
   cartItems   CartItem[]
   orderItems  OrderItem[]
   reviews     Review[]
@@ -116,16 +124,30 @@ model Order {
 }
 
 model OrderItem {
-  id        String  @id @default(uuid())
-  orderId   String
-  productId String
-  vendorId  String
-  quantity  Int
-  unitPrice Float
+  id            String  @id @default(uuid())
+  orderId       String
+  productId     String
+  vendorId      String
+  quantity      Int
+  unitPrice     Float
+  platformFee   Float   @default(0)
+  vendorEarning Float   @default(0)
 
   order   Order   @relation(fields: [orderId], references: [id])
   product Product @relation(fields: [productId], references: [id])
   vendor  Vendor  @relation(fields: [vendorId], references: [id])
+}
+
+model Payout {
+  id        String       @id @default(uuid())
+  vendorId  String
+  amount    Float
+  status    PayoutStatus @default(PENDING)
+  note      String?
+  createdAt DateTime     @default(now())
+  paidAt    DateTime?
+
+  vendor    Vendor @relation(fields: [vendorId], references: [id])
 }
 
 model Review {

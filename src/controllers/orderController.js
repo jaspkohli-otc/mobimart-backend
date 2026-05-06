@@ -7,7 +7,11 @@ const placeOrder = async (req, res) => {
 
     const cartItems = await prisma.cartItem.findMany({
       where: { userId: req.userId },
-      include: { product: true }
+      include: {
+        product: {
+          include: { vendor: true }
+        }
+      }
     })
 
     if (cartItems.length === 0) {
@@ -24,27 +28,36 @@ const placeOrder = async (req, res) => {
         totalAmount: parseFloat(totalAmount.toFixed(2)),
         shippingAddress,
         orderItems: {
-          create: cartItems.map(item => ({
-            productId: item.productId,
-            vendorId: item.product.vendorId,
-            quantity: item.quantity,
-            unitPrice: item.product.price
-          }))
+          create: cartItems.map(item => {
+            const lineTotal = item.product.price * item.quantity
+            const commissionRate = item.product.vendor?.commissionRate || 0.10
+            const platformFee = parseFloat((lineTotal * commissionRate).toFixed(2))
+            const vendorEarning = parseFloat((lineTotal - platformFee).toFixed(2))
+            return {
+              productId: item.productId,
+              vendorId: item.product.vendorId,
+              quantity: item.quantity,
+              unitPrice: item.product.price,
+              platformFee,
+              vendorEarning
+            }
+          })
         }
       },
       include: {
-  orderItems: {
-    include: {
-      product: { select: { name: true } }
-    }
-  }
-}
+        orderItems: {
+          include: {
+            product: { select: { name: true } }
+          }
+        }
+      }
     })
 
     await prisma.cartItem.deleteMany({ where: { userId: req.userId } })
 
     const userForEmail = await prisma.user.findUnique({ where: { id: req.userId } })
-sendOrderConfirmation({ ...order, shippingAddress: shippingAddress }, userForEmail)
+    sendOrderConfirmation({ ...order, shippingAddress: shippingAddress }, userForEmail)
+
     res.status(201).json({ message: 'Order placed successfully', order })
   } catch (error) {
     console.error(error)
@@ -145,6 +158,7 @@ const updateOrderStatus = async (req, res) => {
       where: { id: req.params.id },
       data: { status }
     })
+
     // Send status update email
     const userForEmail = await prisma.user.findUnique({ where: { id: order.userId } })
     const orderWithAddress = await prisma.order.findUnique({ where: { id: req.params.id } })
@@ -170,6 +184,10 @@ const getStats = async (req, res) => {
       })
     ])
 
+    const platformFeeData = await prisma.orderItem.aggregate({
+      _sum: { platformFee: true }
+    })
+
     const recentOrders = await prisma.order.findMany({
       take: 5,
       orderBy: { createdAt: 'desc' },
@@ -182,6 +200,7 @@ const getStats = async (req, res) => {
       totalVendors,
       totalProducts,
       totalRevenue: revenueData._sum.totalAmount || 0,
+      totalPlatformFee: platformFeeData._sum.platformFee || 0,
       recentOrders
     })
   } catch (error) {

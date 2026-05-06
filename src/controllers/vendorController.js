@@ -78,7 +78,6 @@ const uploadImage = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No image uploaded' })
 
-    // Upload buffer to Cloudinary
     const imageUrl = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         { folder: 'mobimart/products', resource_type: 'image' },
@@ -148,4 +147,144 @@ const bulkUpload = async (req, res) => {
   }
 }
 
-module.exports = { createStore, getMyStore, getAllVendors, uploadImage, bulkUpload, upload }
+// ✅ Vendor — get my earnings
+const getMyEarnings = async (req, res) => {
+  try {
+    const vendor = await prisma.vendor.findUnique({ where: { userId: req.userId } })
+    if (!vendor) return res.status(404).json({ error: 'No store found' })
+
+    const orderItems = await prisma.orderItem.findMany({
+      where: { vendorId: vendor.id },
+      include: {
+        order: { select: { id: true, status: true, createdAt: true, shippingAddress: true } },
+        product: { select: { name: true, images: true } }
+      },
+      orderBy: { order: { createdAt: 'desc' } }
+    })
+
+    const payouts = await prisma.payout.findMany({
+      where: { vendorId: vendor.id },
+      orderBy: { createdAt: 'desc' }
+    })
+
+    const totalSales = orderItems.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0)
+    const totalPlatformFee = orderItems.reduce((sum, item) => sum + item.platformFee, 0)
+    const totalEarnings = orderItems.reduce((sum, item) => sum + item.vendorEarning, 0)
+    const totalPaid = payouts.filter(p => p.status === 'PAID').reduce((sum, p) => sum + p.amount, 0)
+    const pendingPayout = totalEarnings - totalPaid
+
+    res.json({
+      vendor: {
+        storeName: vendor.storeName,
+        commissionRate: vendor.commissionRate,
+        ibanNumber: vendor.ibanNumber
+      },
+      summary: {
+        totalSales: parseFloat(totalSales.toFixed(2)),
+        totalPlatformFee: parseFloat(totalPlatformFee.toFixed(2)),
+        totalEarnings: parseFloat(totalEarnings.toFixed(2)),
+        totalPaid: parseFloat(totalPaid.toFixed(2)),
+        pendingPayout: parseFloat(pendingPayout.toFixed(2))
+      },
+      orderItems,
+      payouts
+    })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+}
+
+// ✅ Vendor — update IBAN
+const updateIban = async (req, res) => {
+  try {
+    const { ibanNumber } = req.body
+    const vendor = await prisma.vendor.update({
+      where: { userId: req.userId },
+      data: { ibanNumber }
+    })
+    res.json({ message: 'IBAN updated successfully', vendor })
+  } catch (error) {
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+}
+
+// ✅ Admin — get all vendor earnings & payout summary
+const getAdminPayouts = async (req, res) => {
+  try {
+    const vendors = await prisma.vendor.findMany({
+      include: {
+        user: { select: { name: true, email: true } },
+        orderItems: true,
+        payouts: true,
+        _count: { select: { products: true } }
+      }
+    })
+
+    const vendorSummaries = vendors.map(vendor => {
+      const totalSales = vendor.orderItems.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0)
+      const totalPlatformFee = vendor.orderItems.reduce((sum, item) => sum + item.platformFee, 0)
+      const totalEarnings = vendor.orderItems.reduce((sum, item) => sum + item.vendorEarning, 0)
+      const totalPaid = vendor.payouts.filter(p => p.status === 'PAID').reduce((sum, p) => sum + p.amount, 0)
+      const pendingPayout = totalEarnings - totalPaid
+
+      return {
+        id: vendor.id,
+        storeName: vendor.storeName,
+        ownerName: vendor.user?.name,
+        ownerEmail: vendor.user?.email,
+        ibanNumber: vendor.ibanNumber,
+        commissionRate: vendor.commissionRate,
+        totalSales: parseFloat(totalSales.toFixed(2)),
+        totalPlatformFee: parseFloat(totalPlatformFee.toFixed(2)),
+        totalEarnings: parseFloat(totalEarnings.toFixed(2)),
+        totalPaid: parseFloat(totalPaid.toFixed(2)),
+        pendingPayout: parseFloat(pendingPayout.toFixed(2)),
+        payouts: vendor.payouts
+      }
+    })
+
+    const totalPlatformRevenue = vendorSummaries.reduce((sum, v) => sum + v.totalPlatformFee, 0)
+    const totalPendingPayouts = vendorSummaries.reduce((sum, v) => sum + v.pendingPayout, 0)
+
+    res.json({
+      summary: {
+        totalPlatformRevenue: parseFloat(totalPlatformRevenue.toFixed(2)),
+        totalPendingPayouts: parseFloat(totalPendingPayouts.toFixed(2))
+      },
+      vendors: vendorSummaries
+    })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+}
+
+// ✅ Admin — mark payout as paid
+const markPayoutPaid = async (req, res) => {
+  try {
+    const { vendorId, amount, note } = req.body
+
+    const payout = await prisma.payout.create({
+      data: {
+        vendorId,
+        amount: parseFloat(amount),
+        status: 'PAID',
+        note,
+        paidAt: new Date()
+      }
+    })
+
+    res.json({ message: 'Payout marked as paid', payout })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+}
+
+module.exports = {
+  createStore, getMyStore, getAllVendors,
+  uploadImage, bulkUpload, upload,
+  getMyEarnings, updateIban,
+  getAdminPayouts, markPayoutPaid
+}
