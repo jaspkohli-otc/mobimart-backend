@@ -181,4 +181,53 @@ const sendStatusUpdate = async (order, user, newStatus) => {
   }
 }
 
-module.exports = { sendOrderConfirmation, sendStatusUpdate }
+module.exports = { sendOrderConfirmation, sendStatusUpdate, sendVendorStatusEmail }
+
+const sendVendorStatusEmail = async (email, name, storeName, status, note) => {
+  const nodemailer = require('nodemailer')
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
+  })
+
+  const isApproved = status === 'APPROVED'
+  const subject = isApproved
+    ? `✅ Your MobiMart Store "${storeName}" is Approved!`
+    : `❌ MobiMart Store Registration Update`
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="background: linear-gradient(135deg, #0f1923, #1e3a5f); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+        <h1 style="color: #fff; margin: 0;">Mobi<span style="color: #f97316;">Mart</span></h1>
+        <p style="color: #94a3b8; margin: 8px 0 0;">by JASPR Trading</p>
+      </div>
+      <div style="background: #fff; padding: 32px; border: 1px solid #eee; border-radius: 0 0 12px 12px;">
+        <h2 style="color: #0f1923;">Hello ${name},</h2>
+        ${isApproved ? `
+          <p>Your store <strong>${storeName}</strong> has been <span style="color:#10b981;font-weight:bold;">approved</span> on MobiMart!</p>
+          <p>You can now log in and start listing your products.</p>
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px;margin:20px 0;">
+            <p style="margin:0;color:#065f46;font-weight:600;">📋 Subscription Reminder</p>
+            <p style="margin:8px 0 0;color:#065f46;font-size:14px;">
+              • Setup Fee: QAR 1,000 (one-time)<br>
+              • Monthly: QAR 250/month<br>
+              • Annual Renewal: QAR 500/year
+            </p>
+          </div>
+          <a href="https://mobimart-frontend-app.vercel.app/vendor" style="display:inline-block;background:#f97316;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold;">Go to My Store →</a>
+        ` : `
+          <p>Your store <strong>${storeName}</strong> registration has been <span style="color:#ef4444;font-weight:bold;">not approved</span> at this time.</p>
+          ${note ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin:20px 0;color:#991b1b;"><p style="margin:0;font-weight:600;">Reason:</p><p style="margin:8px 0 0;">${note}</p></div>` : ''}
+          <p>For queries contact: <a href="mailto:mobimartqatar@gmail.com">mobimartqatar@gmail.com</a></p>
+        `}
+      </div>
+    </div>
+  `
+
+  await transporter.sendMail({
+    from: `"MobiMart" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject,
+    html
+  })
+}
