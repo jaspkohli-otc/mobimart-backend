@@ -181,7 +181,7 @@ const sendStatusUpdate = async (order, user, newStatus) => {
   }
 }
 
-module.exports = { sendOrderConfirmation, sendStatusUpdate, sendVendorStatusEmail }
+module.exports = { sendOrderConfirmation, sendStatusUpdate }
 
 const sendVendorStatusEmail = async (email, name, storeName, status, note) => {
   const nodemailer = require('nodemailer')
