@@ -1,1 +1,0 @@
-const { PrismaClient } = require('@prisma/client'); const p = new PrismaClient(); p.$executeRawUnsafe('ALTER TABLE "VendorDocument" RENAME COLUMN "docUrl" TO "fileUrl"').then(() => { console.log('Done'); p.$disconnect() }).catch(e => { console.error(e); p.$disconnect() })
