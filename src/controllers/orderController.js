@@ -1,4 +1,4 @@
-const { sendOrderConfirmation, sendStatusUpdate } = require('../lib/email')
+const { sendOrderConfirmation, sendStatusUpdate, sendVendorOrderNotification } = require('../lib/email')
 const prisma = require('../lib/prisma')
 
 const placeOrder = async (req, res) => {
@@ -7,20 +7,14 @@ const placeOrder = async (req, res) => {
 
     const cartItems = await prisma.cartItem.findMany({
       where: { userId: req.userId },
-      include: {
-        product: {
-          include: { vendor: true }
-        }
-      }
+      include: { product: { include: { vendor: true } } }
     })
 
     if (cartItems.length === 0) {
       return res.status(400).json({ error: 'Your cart is empty' })
     }
 
-    const totalAmount = cartItems.reduce((sum, item) => {
-      return sum + (item.product.price * item.quantity)
-    }, 0)
+    const totalAmount = cartItems.reduce((sum, item) => sum + (item.product.price * item.quantity), 0)
 
     const order = await prisma.order.create({
       data: {
@@ -30,7 +24,7 @@ const placeOrder = async (req, res) => {
         orderItems: {
           create: cartItems.map(item => {
             const lineTotal = item.product.price * item.quantity
-            const commissionRate = item.product.vendor?.commissionRate || 0.10
+            const commissionRate = item.product.vendor?.commissionRate || 0
             const platformFee = parseFloat((lineTotal * commissionRate).toFixed(2))
             const vendorEarning = parseFloat((lineTotal - platformFee).toFixed(2))
             return {
@@ -47,7 +41,8 @@ const placeOrder = async (req, res) => {
       include: {
         orderItems: {
           include: {
-            product: { select: { name: true } }
+            product: { select: { name: true } },
+            vendor: true
           }
         }
       }
@@ -55,8 +50,32 @@ const placeOrder = async (req, res) => {
 
     await prisma.cartItem.deleteMany({ where: { userId: req.userId } })
 
+    // ✅ Email customer invoice
     const userForEmail = await prisma.user.findUnique({ where: { id: req.userId } })
-    sendOrderConfirmation({ ...order, shippingAddress: shippingAddress }, userForEmail)
+    sendOrderConfirmation({ ...order, shippingAddress }, userForEmail)
+
+    // ✅ Email each vendor their items + dispatch info
+    const vendorMap = {}
+    for (const item of order.orderItems) {
+      if (!item.vendorId) continue
+      if (!vendorMap[item.vendorId]) vendorMap[item.vendorId] = []
+      vendorMap[item.vendorId].push(item)
+    }
+
+    for (const [vendorId, items] of Object.entries(vendorMap)) {
+      const vendorRecord = await prisma.vendor.findUnique({
+        where: { id: vendorId },
+        include: { user: { select: { email: true, name: true } } }
+      })
+      if (vendorRecord?.user?.email) {
+        sendVendorOrderNotification(
+          vendorRecord.user.email,
+          vendorRecord.storeName,
+          { ...order, shippingAddress },
+          items
+        )
+      }
+    }
 
     res.status(201).json({ message: 'Order placed successfully', order })
   } catch (error) {
@@ -109,7 +128,6 @@ const getOrder = async (req, res) => {
   }
 }
 
-// ✅ Admin — get ALL orders
 const getAllOrders = async (req, res) => {
   try {
     const orders = await prisma.order.findMany({
@@ -130,12 +148,10 @@ const getAllOrders = async (req, res) => {
   }
 }
 
-// ✅ Update order status — Admin can update any, Vendor can update their own
 const updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body
     const validStatuses = ['PENDING', 'CONFIRMED', 'SHIPPED', 'DELIVERED', 'CANCELLED']
-
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status' })
     }
@@ -144,10 +160,8 @@ const updateOrderStatus = async (req, res) => {
       where: { id: req.params.id },
       include: { orderItems: true }
     })
-
     if (!order) return res.status(404).json({ error: 'Order not found' })
 
-    // If vendor, check they have items in this order
     if (req.userRole === 'VENDOR') {
       const vendor = await prisma.vendor.findUnique({ where: { userId: req.userId } })
       const hasItems = order.orderItems.some(item => item.vendorId === vendor?.id)
@@ -159,7 +173,6 @@ const updateOrderStatus = async (req, res) => {
       data: { status }
     })
 
-    // Send status update email
     const userForEmail = await prisma.user.findUnique({ where: { id: order.userId } })
     const orderWithAddress = await prisma.order.findUnique({ where: { id: req.params.id } })
     sendStatusUpdate(orderWithAddress, userForEmail, status)
@@ -170,7 +183,6 @@ const updateOrderStatus = async (req, res) => {
   }
 }
 
-// ✅ Admin — get stats
 const getStats = async (req, res) => {
   try {
     const [totalOrders, totalUsers, totalVendors, totalProducts, revenueData] = await Promise.all([
@@ -184,10 +196,7 @@ const getStats = async (req, res) => {
       })
     ])
 
-    const platformFeeData = await prisma.orderItem.aggregate({
-      _sum: { platformFee: true }
-    })
-
+    const platformFeeData = await prisma.orderItem.aggregate({ _sum: { platformFee: true } })
     const recentOrders = await prisma.order.findMany({
       take: 5,
       orderBy: { createdAt: 'desc' },
@@ -195,10 +204,7 @@ const getStats = async (req, res) => {
     })
 
     res.json({
-      totalOrders,
-      totalUsers,
-      totalVendors,
-      totalProducts,
+      totalOrders, totalUsers, totalVendors, totalProducts,
       totalRevenue: revenueData._sum.totalAmount || 0,
       totalPlatformFee: platformFeeData._sum.platformFee || 0,
       recentOrders
@@ -208,7 +214,6 @@ const getStats = async (req, res) => {
   }
 }
 
-// ✅ Admin — get all users
 const getAllUsers = async (req, res) => {
   try {
     const users = await prisma.user.findMany({
@@ -221,7 +226,6 @@ const getAllUsers = async (req, res) => {
   }
 }
 
-// ✅ Admin — get all vendors
 const getAllVendorsAdmin = async (req, res) => {
   try {
     const vendors = await prisma.vendor.findMany({
