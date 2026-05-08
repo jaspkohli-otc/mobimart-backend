@@ -33,9 +33,21 @@ const uploadDocument = async (req, res) => {
     if (!vendor) return res.status(404).json({ error: 'No store found' })
 
     const fileUrl = await new Promise((resolve, reject) => {
+      const fileUrl = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         { folder: 'mobimart/kyc-documents', resource_type: 'auto', public_id: `${vendor.id}_${docType}_${Date.now()}` },
-        (error, result) => { if (error) reject(error); else resolve(result.secure_url) }
+        (error, result) => {
+          if (error) {
+            console.error('Cloudinary error:', JSON.stringify(error))
+            reject(new Error('Cloudinary upload failed: ' + error.message))
+          } else if (!result?.secure_url) {
+            console.error('Cloudinary missing URL:', JSON.stringify(result))
+            reject(new Error('Cloudinary did not return a URL'))
+          } else {
+            console.log('Cloudinary success:', result.secure_url)
+            resolve(result.secure_url)
+          }
+        }
       )
       Readable.from(req.file.buffer).pipe(uploadStream)
     })
