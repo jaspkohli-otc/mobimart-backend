@@ -30,7 +30,6 @@ const uploadDocument = async (req, res) => {
     const validTypes = ['CR_COPY', 'TRADE_LICENSE', 'SIGNATORY_QID', 'CONTRACT_COPY']
     if (!validTypes.includes(docType)) return res.status(400).json({ error: 'Invalid document type' })
 
-    // Get vendor by userId
     const vendors = await prisma.$queryRawUnsafe(
       `SELECT id FROM "Vendor" WHERE "userId" = $1 LIMIT 1`,
       req.userId
@@ -38,7 +37,6 @@ const uploadDocument = async (req, res) => {
     if (!vendors.length) return res.status(404).json({ error: 'No store found' })
     const vendorId = vendors[0].id
 
-    // Upload to Cloudinary
     const docUrl = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
@@ -64,16 +62,15 @@ const uploadDocument = async (req, res) => {
     const finalDocName = docName || req.file.originalname
     const now = new Date().toISOString()
 
-    // Check if document already exists for this vendor + docType
     const existing = await prisma.$queryRawUnsafe(
-      `SELECT id FROM "VendorDocument" WHERE "vendorId" = $1 AND "docType" = $2::"DocumentType" LIMIT 1`,
+      `SELECT id FROM "VendorDocument" WHERE "vendorId" = $1 AND "docType" = $2::text::"DocumentType" LIMIT 1`,
       vendorId, docType
     )
 
     let document
     if (existing.length) {
       await prisma.$executeRawUnsafe(
-        `UPDATE "VendorDocument" SET "docName" = $1, "docUrl" = $2, "status" = 'PENDING', "note" = NULL, "uploadedAt" = $3, "reviewedAt" = NULL WHERE id = $4`,
+        `UPDATE "VendorDocument" SET "docName" = $1, "docUrl" = $2, "status" = 'PENDING'::"DocumentStatus", "note" = NULL, "uploadedAt" = $3, "reviewedAt" = NULL WHERE id = $4`,
         finalDocName, docUrl, now, existing[0].id
       )
       const updated = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, existing[0].id)
@@ -146,7 +143,7 @@ const reviewDocument = async (req, res) => {
 
     const now = new Date().toISOString()
     await prisma.$executeRawUnsafe(
-      `UPDATE "VendorDocument" SET "status" = $1::"DocumentStatus", "note" = $2, "reviewedAt" = $3 WHERE id = $4`,
+      `UPDATE "VendorDocument" SET "status" = $1::text::"DocumentStatus", "note" = $2, "reviewedAt" = $3 WHERE id = $4`,
       status, note || null, now, req.params.id
     )
 
