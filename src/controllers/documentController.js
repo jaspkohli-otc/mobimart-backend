@@ -3,7 +3,8 @@ const cloudinary = require('cloudinary').v2
 const multer = require('multer')
 const { Readable } = require('stream')
 const { sendVendorStatusEmail } = require('../lib/email')
-const { v4: uuidv4 } = require('uuid')
+const { randomUUID } = require('crypto')
+const uuidv4 = randomUUID
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
