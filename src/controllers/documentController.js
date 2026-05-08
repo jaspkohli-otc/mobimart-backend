@@ -33,14 +33,17 @@ const uploadDocument = async (req, res) => {
     if (!vendor) return res.status(404).json({ error: 'No store found' })
 
     const fileUrl = await new Promise((resolve, reject) => {
-      const fileUrl = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { folder: 'mobimart/kyc-documents', resource_type: 'auto', public_id: `${vendor.id}_${docType}_${Date.now()}` },
+        {
+          folder: 'mobimart/kyc-documents',
+          resource_type: 'auto',
+          public_id: `${vendor.id}_${docType}_${Date.now()}`
+        },
         (error, result) => {
           if (error) {
             console.error('Cloudinary error:', JSON.stringify(error))
             reject(new Error('Cloudinary upload failed: ' + error.message))
-          } else if (!result?.secure_url) {
+          } else if (!result || !result.secure_url) {
             console.error('Cloudinary missing URL:', JSON.stringify(result))
             reject(new Error('Cloudinary did not return a URL'))
           } else {
@@ -54,7 +57,6 @@ const uploadDocument = async (req, res) => {
 
     const finalDocName = docName || req.file.originalname
 
-    // Upsert — update if exists, create if not
     const existing = await prisma.vendorDocument.findFirst({
       where: { vendorId: vendor.id, docType }
     })
@@ -63,11 +65,24 @@ const uploadDocument = async (req, res) => {
     if (existing) {
       document = await prisma.vendorDocument.update({
         where: { id: existing.id },
-        data: { docName: finalDocName, fileUrl, status: 'PENDING', note: null, uploadedAt: new Date(), reviewedAt: null }
+        data: {
+          docName: finalDocName,
+          fileUrl,
+          status: 'PENDING',
+          note: null,
+          uploadedAt: new Date(),
+          reviewedAt: null
+        }
       })
     } else {
       document = await prisma.vendorDocument.create({
-        data: { vendorId: vendor.id, docType, docName: finalDocName, fileUrl, status: 'PENDING' }
+        data: {
+          vendorId: vendor.id,
+          docType,
+          docName: finalDocName,
+          fileUrl,
+          status: 'PENDING'
+        }
       })
     }
 
@@ -115,7 +130,9 @@ const getAllDocuments = async (req, res) => {
 const reviewDocument = async (req, res) => {
   try {
     const { status, note } = req.body
-    if (!['APPROVED', 'REJECTED'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+    if (!['APPROVED', 'REJECTED'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' })
+    }
 
     const document = await prisma.vendorDocument.update({
       where: { id: req.params.id },
@@ -124,9 +141,10 @@ const reviewDocument = async (req, res) => {
 
     if (!document) return res.status(404).json({ error: 'Document not found' })
 
-    // Check if all required docs are approved — auto-approve vendor
     const requiredDocs = ['CR_COPY', 'TRADE_LICENSE', 'SIGNATORY_QID']
-    const allDocs = await prisma.vendorDocument.findMany({ where: { vendorId: document.vendorId } })
+    const allDocs = await prisma.vendorDocument.findMany({
+      where: { vendorId: document.vendorId }
+    })
     const allRequiredApproved = requiredDocs.every(type =>
       allDocs.some(d => d.docType === type && d.status === 'APPROVED')
     )
@@ -142,12 +160,22 @@ const reviewDocument = async (req, res) => {
         include: { user: { select: { email: true, name: true } } }
       })
 
-      if (vendor?.user?.email) {
-        sendVendorStatusEmail(vendor.user.email, vendor.user.name, vendor.storeName, 'APPROVED', null)
+      if (vendor && vendor.user && vendor.user.email) {
+        sendVendorStatusEmail(
+          vendor.user.email,
+          vendor.user.name,
+          vendor.storeName,
+          'APPROVED',
+          null
+        )
       }
     }
 
-    res.json({ message: `Document ${status.toLowerCase()}`, document, vendorFullyApproved: allRequiredApproved })
+    res.json({
+      message: `Document ${status.toLowerCase()}`,
+      document,
+      vendorFullyApproved: allRequiredApproved
+    })
   } catch (error) {
     console.error('reviewDocument error:', error)
     res.status(500).json({ error: error.message })
@@ -167,4 +195,11 @@ const getVendorBankDetails = async (req, res) => {
   }
 }
 
-module.exports = { upload, uploadDocument, getMyDocuments, getAllDocuments, reviewDocument, getVendorBankDetails }
+module.exports = {
+  upload,
+  uploadDocument,
+  getMyDocuments,
+  getAllDocuments,
+  reviewDocument,
+  getVendorBankDetails
+}
