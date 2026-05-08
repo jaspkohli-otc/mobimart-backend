@@ -60,7 +60,7 @@ const uploadDocument = async (req, res) => {
     })
 
     const finalDocName = docName || req.file.originalname
-    const now = new Date().toISOString()
+    const now = new Date()
 
     const existing = await prisma.$queryRawUnsafe(
       `SELECT id FROM "VendorDocument" WHERE "vendorId" = $1 AND "docType" = $2::text::"DocumentType" LIMIT 1`,
@@ -70,7 +70,7 @@ const uploadDocument = async (req, res) => {
     let document
     if (existing.length) {
       await prisma.$executeRawUnsafe(
-        `UPDATE "VendorDocument" SET "docName" = $1, "docUrl" = $2, "status" = 'PENDING'::"DocumentStatus", "note" = NULL, "uploadedAt" = $3, "reviewedAt" = NULL WHERE id = $4`,
+        `UPDATE "VendorDocument" SET "docName" = $1, "docUrl" = $2, "status" = 'PENDING'::"DocumentStatus", "note" = NULL, "uploadedAt" = $3::timestamp, "reviewedAt" = NULL WHERE id = $4`,
         finalDocName, docUrl, now, existing[0].id
       )
       const updated = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, existing[0].id)
@@ -78,7 +78,7 @@ const uploadDocument = async (req, res) => {
     } else {
       const id = randomUUID()
       await prisma.$executeRawUnsafe(
-        `INSERT INTO "VendorDocument" (id, "vendorId", "docType", "docName", "docUrl", status, "uploadedAt") VALUES ($1, $2, $3::text::"DocumentType", $4, $5, 'PENDING'::"DocumentStatus", $6)`,
+        `INSERT INTO "VendorDocument" (id, "vendorId", "docType", "docName", "docUrl", status, "uploadedAt") VALUES ($1, $2, $3::text::"DocumentType", $4, $5, 'PENDING'::"DocumentStatus", $6::timestamp)`,
         id, vendorId, docType, finalDocName, docUrl, now
       )
       const created = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, id)
@@ -141,9 +141,9 @@ const reviewDocument = async (req, res) => {
     const { status, note } = req.body
     if (!['APPROVED', 'REJECTED'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
 
-    const now = new Date().toISOString()
+    const now = new Date()
     await prisma.$executeRawUnsafe(
-      `UPDATE "VendorDocument" SET "status" = $1::text::"DocumentStatus", "note" = $2, "reviewedAt" = $3 WHERE id = $4`,
+      `UPDATE "VendorDocument" SET "status" = $1::text::"DocumentStatus", "note" = $2, "reviewedAt" = $3::timestamp WHERE id = $4`,
       status, note || null, now, req.params.id
     )
 
