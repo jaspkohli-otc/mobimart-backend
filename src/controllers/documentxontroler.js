@@ -135,4 +135,24 @@ const reviewDocument = async (req, res) => {
       }
     }
 
-    res.json({ message: `Document ${status.
+    res.json({ message: `Document ${status.toLowerCase()}`, document, vendorFullyApproved: allRequiredApproved })
+  } catch (error) {
+    console.error('reviewDocument error:', error)
+    res.status(500).json({ error: error.message })
+  }
+}
+
+const getVendorBankDetails = async (req, res) => {
+  try {
+    const vendor = await prisma.vendor.findUnique({
+      where: { id: req.params.vendorId },
+      include: { user: { select: { name: true, email: true } } }
+    })
+    if (!vendor) return res.status(404).json({ error: 'Vendor not found' })
+    res.json(vendor)
+  } catch (error) {
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+}
+
+module.exports = { upload, uploadDocument, getMyDocuments, getAllDocuments, reviewDocument, getVendorBankDetails }
