@@ -4,7 +4,6 @@ const multer = require('multer')
 const { Readable } = require('stream')
 const { sendVendorStatusEmail } = require('../lib/email')
 const { randomUUID } = require('crypto')
-const uuidv4 = randomUUID
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -41,15 +40,24 @@ const uploadDocument = async (req, res) => {
     })
     const finalDocName = docName || req.file.originalname
     const now = new Date().toISOString()
-    const existing = await prisma.$queryRawUnsafe(`SELECT id FROM "VendorDocument" WHERE "vendorId" = $1 AND "docType" = $2 LIMIT 1`, vendorId, docType)
+    const existing = await prisma.$queryRawUnsafe(
+      `SELECT id FROM "VendorDocument" WHERE "vendorId" = $1 AND "docType" = $2::"DocumentType" LIMIT 1`,
+      vendorId, docType
+    )
     let document
     if (existing.length) {
-      await prisma.$executeRawUnsafe(`UPDATE "VendorDocument" SET "docName" = $1, "fileUrl" = $2, "status" = 'PENDING', "note" = NULL, "uploadedAt" = $3, "reviewedAt" = NULL WHERE id = $4`, finalDocName, fileUrl, now, existing[0].id)
+      await prisma.$executeRawUnsafe(
+        `UPDATE "VendorDocument" SET "docName" = $1, "fileUrl" = $2, "status" = 'PENDING', "note" = NULL, "uploadedAt" = $3, "reviewedAt" = NULL WHERE id = $4`,
+        finalDocName, fileUrl, now, existing[0].id
+      )
       const updated = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, existing[0].id)
       document = updated[0]
     } else {
-      const id = uuidv4()
-      await prisma.$executeRawUnsafe(`INSERT INTO "VendorDocument" (id, "vendorId", "docType", "docName", "fileUrl", "status", "uploadedAt") VALUES ($1, $2, $3, $4, $5, 'PENDING', $6)`, id, vendorId, docType, finalDocName, fileUrl, now)
+      const id = randomUUID()
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "VendorDocument" (id, "vendorId", "docType", "docName", "fileUrl", "status", "uploadedAt") VALUES ($1, $2, $3::"DocumentType", $4, $5, 'PENDING', $6)`,
+        id, vendorId, docType, finalDocName, fileUrl, now
+      )
       const created = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, id)
       document = created[0]
     }
@@ -64,7 +72,10 @@ const getMyDocuments = async (req, res) => {
   try {
     const vendors = await prisma.$queryRawUnsafe(`SELECT id FROM "Vendor" WHERE "userId" = $1 LIMIT 1`, req.userId)
     if (!vendors.length) return res.status(404).json({ error: 'No store found' })
-    const documents = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE "vendorId" = $1 ORDER BY "uploadedAt" DESC`, vendors[0].id)
+    const documents = await prisma.$queryRawUnsafe(
+      `SELECT * FROM "VendorDocument" WHERE "vendorId" = $1 ORDER BY "uploadedAt" DESC`,
+      vendors[0].id
+    )
     res.json(documents)
   } catch (error) {
     console.error('getMyDocuments error:', error.message)
@@ -74,13 +85,22 @@ const getMyDocuments = async (req, res) => {
 
 const getAllDocuments = async (req, res) => {
   try {
-    const vendors = await prisma.$queryRawUnsafe(`SELECT v.*, u.name as "userName", u.email as "userEmail" FROM "Vendor" v LEFT JOIN "User" u ON v."userId" = u.id ORDER BY v."createdAt" DESC`)
+    const vendors = await prisma.$queryRawUnsafe(
+      `SELECT v.*, u.name as "userName", u.email as "userEmail" FROM "Vendor" v LEFT JOIN "User" u ON v."userId" = u.id ORDER BY v."createdAt" DESC`
+    )
     const vendorIds = vendors.map(v => v.id)
     let documents = []
     if (vendorIds.length > 0) {
-      documents = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE "vendorId" = ANY($1::text[]) ORDER BY "uploadedAt" DESC`, vendorIds)
+      documents = await prisma.$queryRawUnsafe(
+        `SELECT * FROM "VendorDocument" WHERE "vendorId" = ANY($1::text[]) ORDER BY "uploadedAt" DESC`,
+        vendorIds
+      )
     }
-    const result = vendors.map(v => ({ ...v, user: { name: v.userName, email: v.userEmail }, documents: documents.filter(d => d.vendorId === v.id) }))
+    const result = vendors.map(v => ({
+      ...v,
+      user: { name: v.userName, email: v.userEmail },
+      documents: documents.filter(d => d.vendorId === v.id)
+    }))
     res.json(result)
   } catch (error) {
     console.error('getAllDocuments error:', error.message)
@@ -93,17 +113,30 @@ const reviewDocument = async (req, res) => {
     const { status, note } = req.body
     if (!['APPROVED', 'REJECTED'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
     const now = new Date().toISOString()
-    await prisma.$executeRawUnsafe(`UPDATE "VendorDocument" SET "status" = $1, "note" = $2, "reviewedAt" = $3 WHERE id = $4`, status, note || null, now, req.params.id)
+    await prisma.$executeRawUnsafe(
+      `UPDATE "VendorDocument" SET "status" = $1::"DocumentStatus", "note" = $2, "reviewedAt" = $3 WHERE id = $4`,
+      status, note || null, now, req.params.id
+    )
     const docs = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, req.params.id)
     const document = docs[0]
     if (!document) return res.status(404).json({ error: 'Document not found' })
     const requiredDocs = ['CR_COPY', 'TRADE_LICENSE', 'SIGNATORY_QID']
     const allDocs = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE "vendorId" = $1`, document.vendorId)
-    const allRequiredApproved = requiredDocs.every(type => allDocs.some(d => d.docType === type && d.status === 'APPROVED'))
+    const allRequiredApproved = requiredDocs.every(type =>
+      allDocs.some(d => d.docType === type && d.status === 'APPROVED')
+    )
     if (allRequiredApproved) {
-      await prisma.$executeRawUnsafe(`UPDATE "Vendor" SET "status" = 'APPROVED', "isVerified" = true WHERE id = $1`, document.vendorId)
-      const vendorData = await prisma.$queryRawUnsafe(`SELECT v.*, u.email as "userEmail", u.name as "userName" FROM "Vendor" v LEFT JOIN "User" u ON v."userId" = u.id WHERE v.id = $1`, document.vendorId)
-      if (vendorData[0]?.userEmail) sendVendorStatusEmail(vendorData[0].userEmail, vendorData[0].userName, vendorData[0].storeName, 'APPROVED', null)
+      await prisma.$executeRawUnsafe(
+        `UPDATE "Vendor" SET "status" = 'APPROVED', "isVerified" = true WHERE id = $1`,
+        document.vendorId
+      )
+      const vendorData = await prisma.$queryRawUnsafe(
+        `SELECT v.*, u.email as "userEmail", u.name as "userName" FROM "Vendor" v LEFT JOIN "User" u ON v."userId" = u.id WHERE v.id = $1`,
+        document.vendorId
+      )
+      if (vendorData[0]?.userEmail) {
+        sendVendorStatusEmail(vendorData[0].userEmail, vendorData[0].userName, vendorData[0].storeName, 'APPROVED', null)
+      }
     }
     res.json({ message: `Document ${status.toLowerCase()}`, document, vendorFullyApproved: allRequiredApproved })
   } catch (error) {
@@ -114,7 +147,10 @@ const reviewDocument = async (req, res) => {
 
 const getVendorBankDetails = async (req, res) => {
   try {
-    const vendors = await prisma.$queryRawUnsafe(`SELECT v.*, u.name, u.email FROM "Vendor" v LEFT JOIN "User" u ON v."userId" = u.id WHERE v.id = $1`, req.params.vendorId)
+    const vendors = await prisma.$queryRawUnsafe(
+      `SELECT v.*, u.name, u.email FROM "Vendor" v LEFT JOIN "User" u ON v."userId" = u.id WHERE v.id = $1`,
+      req.params.vendorId
+    )
     if (!vendors.length) return res.status(404).json({ error: 'Vendor not found' })
     res.json(vendors[0])
   } catch (error) {
