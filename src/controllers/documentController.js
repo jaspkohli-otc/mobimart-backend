@@ -3,6 +3,7 @@ const cloudinary = require('cloudinary').v2
 const multer = require('multer')
 const { Readable } = require('stream')
 const { sendVendorStatusEmail } = require('../lib/email')
+const { randomUUID } = require('crypto')
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -29,22 +30,27 @@ const uploadDocument = async (req, res) => {
     const validTypes = ['CR_COPY', 'TRADE_LICENSE', 'SIGNATORY_QID', 'CONTRACT_COPY']
     if (!validTypes.includes(docType)) return res.status(400).json({ error: 'Invalid document type' })
 
-    const vendor = await prisma.vendor.findUnique({ where: { userId: req.userId } })
-    if (!vendor) return res.status(404).json({ error: 'No store found' })
+    // Get vendor by userId
+    const vendors = await prisma.$queryRawUnsafe(
+      `SELECT id FROM "Vendor" WHERE "userId" = $1 LIMIT 1`,
+      req.userId
+    )
+    if (!vendors.length) return res.status(404).json({ error: 'No store found' })
+    const vendorId = vendors[0].id
 
+    // Upload to Cloudinary
     const fileUrl = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
           folder: 'mobimart/kyc-documents',
           resource_type: 'auto',
-          public_id: `${vendor.id}_${docType}_${Date.now()}`
+          public_id: `${vendorId}_${docType}_${Date.now()}`
         },
         (error, result) => {
           if (error) {
             console.error('Cloudinary error:', JSON.stringify(error))
             reject(new Error('Cloudinary upload failed: ' + error.message))
           } else if (!result || !result.secure_url) {
-            console.error('Cloudinary missing URL:', JSON.stringify(result))
             reject(new Error('Cloudinary did not return a URL'))
           } else {
             console.log('Cloudinary success:', result.secure_url)
@@ -56,73 +62,79 @@ const uploadDocument = async (req, res) => {
     })
 
     const finalDocName = docName || req.file.originalname
+    const now = new Date().toISOString()
 
-    const existing = await prisma.vendorDocument.findFirst({
-      where: { vendorId: vendor.id, docType }
-    })
+    // Check if document already exists for this vendor + docType
+    const existing = await prisma.$queryRawUnsafe(
+      `SELECT id FROM "VendorDocument" WHERE "vendorId" = $1 AND "docType" = $2::"DocumentType" LIMIT 1`,
+      vendorId, docType
+    )
 
     let document
-    if (existing) {
-      document = await prisma.vendorDocument.update({
-        where: { id: existing.id },
-        data: {
-          docName: finalDocName,
-          fileUrl,
-          status: 'PENDING',
-          note: null,
-          uploadedAt: new Date(),
-          reviewedAt: null
-        }
-      })
+    if (existing.length) {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "VendorDocument" SET "docName" = $1, "fileUrl" = $2, "status" = 'PENDING', "note" = NULL, "uploadedAt" = $3, "reviewedAt" = NULL WHERE id = $4`,
+        finalDocName, fileUrl, now, existing[0].id
+      )
+      const updated = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, existing[0].id)
+      document = updated[0]
     } else {
-      document = await prisma.vendorDocument.create({
-        data: {
-          vendorId: vendor.id,
-          docType,
-          docName: finalDocName,
-          fileUrl,
-          status: 'PENDING'
-        }
-      })
+      const id = randomUUID()
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "VendorDocument" (id, "vendorId", "docType", "docName", "fileUrl", "status", "uploadedAt") VALUES ($1, $2, $3::"DocumentType", $4, $5, 'PENDING', $6)`,
+        id, vendorId, docType, finalDocName, fileUrl, now
+      )
+      const created = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, id)
+      document = created[0]
     }
 
     res.status(201).json({ message: 'Document uploaded successfully', document })
   } catch (error) {
-    console.error('Document upload error:', error)
+    console.error('Document upload error:', error.message)
     res.status(500).json({ error: error.message || 'Document upload failed' })
   }
 }
 
 const getMyDocuments = async (req, res) => {
   try {
-    const vendor = await prisma.vendor.findUnique({ where: { userId: req.userId } })
-    if (!vendor) return res.status(404).json({ error: 'No store found' })
+    const vendors = await prisma.$queryRawUnsafe(
+      `SELECT id FROM "Vendor" WHERE "userId" = $1 LIMIT 1`,
+      req.userId
+    )
+    if (!vendors.length) return res.status(404).json({ error: 'No store found' })
 
-    const documents = await prisma.vendorDocument.findMany({
-      where: { vendorId: vendor.id },
-      orderBy: { uploadedAt: 'desc' }
-    })
-
+    const documents = await prisma.$queryRawUnsafe(
+      `SELECT * FROM "VendorDocument" WHERE "vendorId" = $1 ORDER BY "uploadedAt" DESC`,
+      vendors[0].id
+    )
     res.json(Array.isArray(documents) ? documents : [])
   } catch (error) {
-    console.error('getMyDocuments error:', error)
+    console.error('getMyDocuments error:', error.message)
     res.status(500).json({ error: error.message })
   }
 }
 
 const getAllDocuments = async (req, res) => {
   try {
-    const vendors = await prisma.vendor.findMany({
-      include: {
-        user: { select: { name: true, email: true } },
-        documents: { orderBy: { uploadedAt: 'desc' } }
-      },
-      orderBy: { createdAt: 'desc' }
-    })
-
-    res.json(vendors)
+    const vendors = await prisma.$queryRawUnsafe(
+      `SELECT v.*, u.name as "userName", u.email as "userEmail" FROM "Vendor" v LEFT JOIN "User" u ON v."userId" = u.id ORDER BY v."createdAt" DESC`
+    )
+    const vendorIds = vendors.map(v => v.id)
+    let documents = []
+    if (vendorIds.length > 0) {
+      documents = await prisma.$queryRawUnsafe(
+        `SELECT * FROM "VendorDocument" WHERE "vendorId" = ANY($1::text[]) ORDER BY "uploadedAt" DESC`,
+        vendorIds
+      )
+    }
+    const result = vendors.map(v => ({
+      ...v,
+      user: { name: v.userName, email: v.userEmail },
+      documents: documents.filter(d => d.vendorId === v.id)
+    }))
+    res.json(result)
   } catch (error) {
-    console.error('getAllDocuments error:', error)
+    console.error('getAllDocuments error:', error.message)
     res.status(500).json({ error: error.message })
   }
 }
@@ -130,76 +142,58 @@ const getAllDocuments = async (req, res) => {
 const reviewDocument = async (req, res) => {
   try {
     const { status, note } = req.body
-    if (!['APPROVED', 'REJECTED'].includes(status)) {
-      return res.status(400).json({ error: 'Invalid status' })
-    }
+    if (!['APPROVED', 'REJECTED'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
 
-    const document = await prisma.vendorDocument.update({
-      where: { id: req.params.id },
-      data: { status, note: note || null, reviewedAt: new Date() }
-    })
+    const now = new Date().toISOString()
+    await prisma.$executeRawUnsafe(
+      `UPDATE "VendorDocument" SET "status" = $1::"DocumentStatus", "note" = $2, "reviewedAt" = $3 WHERE id = $4`,
+      status, note || null, now, req.params.id
+    )
 
+    const docs = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, req.params.id)
+    const document = docs[0]
     if (!document) return res.status(404).json({ error: 'Document not found' })
 
     const requiredDocs = ['CR_COPY', 'TRADE_LICENSE', 'SIGNATORY_QID']
-    const allDocs = await prisma.vendorDocument.findMany({
-      where: { vendorId: document.vendorId }
-    })
+    const allDocs = await prisma.$queryRawUnsafe(
+      `SELECT * FROM "VendorDocument" WHERE "vendorId" = $1`, document.vendorId
+    )
     const allRequiredApproved = requiredDocs.every(type =>
       allDocs.some(d => d.docType === type && d.status === 'APPROVED')
     )
 
     if (allRequiredApproved) {
-      await prisma.vendor.update({
-        where: { id: document.vendorId },
-        data: { status: 'APPROVED', isVerified: true }
-      })
-
-      const vendor = await prisma.vendor.findUnique({
-        where: { id: document.vendorId },
-        include: { user: { select: { email: true, name: true } } }
-      })
-
-      if (vendor && vendor.user && vendor.user.email) {
-        sendVendorStatusEmail(
-          vendor.user.email,
-          vendor.user.name,
-          vendor.storeName,
-          'APPROVED',
-          null
-        )
+      await prisma.$executeRawUnsafe(
+        `UPDATE "Vendor" SET "status" = 'APPROVED', "isVerified" = true WHERE id = $1`,
+        document.vendorId
+      )
+      const vendorData = await prisma.$queryRawUnsafe(
+        `SELECT v.*, u.email as "userEmail", u.name as "userName" FROM "Vendor" v LEFT JOIN "User" u ON v."userId" = u.id WHERE v.id = $1`,
+        document.vendorId
+      )
+      if (vendorData[0]?.userEmail) {
+        sendVendorStatusEmail(vendorData[0].userEmail, vendorData[0].userName, vendorData[0].storeName, 'APPROVED', null)
       }
     }
 
-    res.json({
-      message: `Document ${status.toLowerCase()}`,
-      document,
-      vendorFullyApproved: allRequiredApproved
-    })
+    res.json({ message: `Document ${status.toLowerCase()}`, document, vendorFullyApproved: allRequiredApproved })
   } catch (error) {
-    console.error('reviewDocument error:', error)
+    console.error('reviewDocument error:', error.message)
     res.status(500).json({ error: error.message })
   }
 }
 
 const getVendorBankDetails = async (req, res) => {
   try {
-    const vendor = await prisma.vendor.findUnique({
-      where: { id: req.params.vendorId },
-      include: { user: { select: { name: true, email: true } } }
-    })
-    if (!vendor) return res.status(404).json({ error: 'Vendor not found' })
-    res.json(vendor)
+    const vendors = await prisma.$queryRawUnsafe(
+      `SELECT v.*, u.name, u.email FROM "Vendor" v LEFT JOIN "User" u ON v."userId" = u.id WHERE v.id = $1`,
+      req.params.vendorId
+    )
+    if (!vendors.length) return res.status(404).json({ error: 'Vendor not found' })
+    res.json(vendors[0])
   } catch (error) {
     res.status(500).json({ error: 'Something went wrong' })
   }
 }
 
-module.exports = {
-  upload,
-  uploadDocument,
-  getMyDocuments,
-  getAllDocuments,
-  reviewDocument,
-  getVendorBankDetails
-}
+module.exports = { upload, uploadDocument, getMyDocuments, getAllDocuments, reviewDocument, getVendorBankDetails }
