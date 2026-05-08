@@ -39,7 +39,7 @@ const uploadDocument = async (req, res) => {
     const vendorId = vendors[0].id
 
     // Upload to Cloudinary
-    const fileUrl = await new Promise((resolve, reject) => {
+    const docUrl = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
           folder: 'mobimart/kyc-documents',
@@ -73,16 +73,16 @@ const uploadDocument = async (req, res) => {
     let document
     if (existing.length) {
       await prisma.$executeRawUnsafe(
-        `UPDATE "VendorDocument" SET "docName" = $1, "fileUrl" = $2, "status" = 'PENDING', "note" = NULL, "uploadedAt" = $3, "reviewedAt" = NULL WHERE id = $4`,
-        finalDocName, fileUrl, now, existing[0].id
+        `UPDATE "VendorDocument" SET "docName" = $1, "docUrl" = $2, "status" = 'PENDING', "note" = NULL, "uploadedAt" = $3, "reviewedAt" = NULL WHERE id = $4`,
+        finalDocName, docUrl, now, existing[0].id
       )
       const updated = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, existing[0].id)
       document = updated[0]
     } else {
       const id = randomUUID()
       await prisma.$executeRawUnsafe(
-        `INSERT INTO "VendorDocument" (id, "vendorId", "docType", "docName", "fileUrl", status, "uploadedAt") VALUES ($1, $2, $3::text::"DocumentType", $4, $5, 'PENDING'::"DocumentStatus", $6)`,
-        id, vendorId, docType, finalDocName, fileUrl, now
+        `INSERT INTO "VendorDocument" (id, "vendorId", "docType", "docName", "docUrl", status, "uploadedAt") VALUES ($1, $2, $3::text::"DocumentType", $4, $5, 'PENDING'::"DocumentStatus", $6)`,
+        id, vendorId, docType, finalDocName, docUrl, now
       )
       const created = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, id)
       document = created[0]
