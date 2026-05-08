@@ -83,8 +83,8 @@ const uploadDocument = async (req, res) => {
 
     res.status(201).json({ message: 'Document uploaded successfully', document })
   } catch (error) {
-    console.error('Document upload error:', error)
-    res.status(500).json({ error: 'Document upload failed' })
+    console.error('Document upload error:', error.message, error.stack)
+    res.status(500).json({ error: error.message || 'Document upload failed' })
   }
 }
 
