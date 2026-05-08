@@ -39,7 +39,7 @@ const uploadDocument = async (req, res) => {
       Readable.from(req.file.buffer).pipe(uploadStream)
     })
     const finalDocName = docName || req.file.originalname
-    const now = new Date().toISOString()
+    const now = new Date()
     const existing = await prisma.$queryRawUnsafe(
       `SELECT id FROM "VendorDocument" WHERE "vendorId" = $1 AND "docType" = $2::"DocumentType" LIMIT 1`,
       vendorId, docType
@@ -112,7 +112,7 @@ const reviewDocument = async (req, res) => {
   try {
     const { status, note } = req.body
     if (!['APPROVED', 'REJECTED'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
-    const now = new Date().toISOString()
+    const now = new Date()
     await prisma.$executeRawUnsafe(
       `UPDATE "VendorDocument" SET "status" = $1::"DocumentStatus", "note" = $2, "reviewedAt" = $3 WHERE id = $4`,
       status, note || null, now, req.params.id
