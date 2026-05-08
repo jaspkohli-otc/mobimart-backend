@@ -81,8 +81,8 @@ const uploadDocument = async (req, res) => {
     } else {
       const id = randomUUID()
       await prisma.$executeRawUnsafe(
-        INSERT INTO "VendorDocument" (id, "vendorId", "docType", "docName", "docUrl", status, "uploadedAt")
-        id, vendorId, docType, finalDocName, docUrl, 'pending' new Date
+        `INSERT INTO "VendorDocument" (id, "vendorId", "docType", "docName", "fileUrl", status, "uploadedAt") VALUES ($1, $2, $3::text::"DocumentType", $4, $5, 'PENDING'::"DocumentStatus", $6)`,
+        id, vendorId, docType, finalDocName, fileUrl, now
       )
       const created = await prisma.$queryRawUnsafe(`SELECT * FROM "VendorDocument" WHERE id = $1`, id)
       document = created[0]
