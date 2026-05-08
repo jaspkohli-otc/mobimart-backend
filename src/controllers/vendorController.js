@@ -50,7 +50,6 @@ const getMyStore = async (req, res) => {
           include: { category: { select: { name: true } } },
           orderBy: { createdAt: 'desc' }
         },
-        documents: { orderBy: { uploadedAt: 'desc' } }
       }
     })
     if (!vendor) return res.status(404).json({ error: 'No store found' })
