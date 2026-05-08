@@ -14,7 +14,11 @@ exports.register = async (req, res) => {
     const user = await prisma.user.create({
       data: { name, email, passwordHash, phone, role: assignedRole }
     })
-    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' })
+    const token = jwt.sign(
+      { userId: user.id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    )
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -28,7 +32,11 @@ exports.login = async (req, res) => {
     if (!user) return res.status(400).json({ error: 'Invalid credentials' })
     const valid = await bcrypt.compare(password, user.passwordHash)
     if (!valid) return res.status(400).json({ error: 'Invalid credentials' })
-    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' })
+    const token = jwt.sign(
+      { userId: user.id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    )
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -37,8 +45,9 @@ exports.login = async (req, res) => {
 
 exports.me = async (req, res) => {
   try {
+    if (!req.userId) return res.status(401).json({ error: 'Not authenticated' })
     const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
+      where: { id: req.userId },
       select: { id: true, name: true, email: true, role: true, phone: true }
     })
     res.json(user)
