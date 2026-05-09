@@ -1,47 +1,38 @@
-const nodemailer = require('nodemailer')
-const dns = require('dns')
+const { Resend } = require('resend')
 
-// From-address helpers — fall back to EMAIL_USER if a specific FROM isn't set
-const FROM_NOREPLY = process.env.EMAIL_FROM_NOREPLY || `"MobiMart" <${process.env.EMAIL_USER}>`
-const FROM_ORDERS  = process.env.EMAIL_FROM_ORDERS  || `"MobiMart Orders" <${process.env.EMAIL_USER}>`
-const FROM_SUPPORT = process.env.EMAIL_FROM_SUPPORT || `"MobiMart Support" <${process.env.EMAIL_USER}>`
+// Lazy-initialised Resend client — only fails at first send, not at server boot,
+// in case RESEND_API_KEY isn't set yet.
+let _resend = null
+function getResend() {
+  if (_resend) return _resend
+  const key = process.env.RESEND_API_KEY
+  if (!key) throw new Error('RESEND_API_KEY is not set')
+  _resend = new Resend(key)
+  return _resend
+}
+
+// From-address helpers — fall back to defaults if env vars not set.
+// Resend requires the "from" domain to be verified in their dashboard.
+const FROM_NOREPLY = process.env.EMAIL_FROM_NOREPLY || 'MobiMart <noreply@jasprmarket.com>'
+const FROM_ORDERS  = process.env.EMAIL_FROM_ORDERS  || 'MobiMart Orders <orders@jasprmarket.com>'
+const FROM_SUPPORT = process.env.EMAIL_FROM_SUPPORT || 'MobiMart Support <support@jasprmarket.com>'
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@jasprmarket.com'
 
-// Lazy-create the transporter with a resolved IPv4 host
-// (Railway containers don't reliably support outbound IPv6, so we bypass
-//  Node's DNS resolver and pass an IPv4 IP directly to nodemailer.)
-let _transporter = null
-
-async function getTransporter() {
-  if (_transporter) return _transporter
-
-  const ipv4 = await new Promise((resolve, reject) => {
-    dns.resolve4('smtp.gmail.com', (err, addrs) => {
-      if (err || !addrs?.length) return reject(err || new Error('No IPv4 addresses returned'))
-      resolve(addrs[0])
-    })
+// Centralised send wrapper — keeps error handling and logging consistent.
+async function send({ from, to, subject, html, replyTo }) {
+  const resend = getResend()
+  const { data, error } = await resend.emails.send({
+    from,
+    to: Array.isArray(to) ? to : [to],
+    subject,
+    html,
+    ...(replyTo ? { replyTo } : {}),
   })
-
-  console.log('Creating SMTP transporter with IPv4 host:', ipv4)
-
-  _transporter = nodemailer.createTransport({
-    host: ipv4,
-    port: 587,
-    secure: false,
-    requireTLS: true,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    },
-    tls: {
-      servername: 'smtp.gmail.com' // TLS validates against hostname, not IP
-    },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000
-  })
-
-  return _transporter
+  if (error) {
+    console.error('Resend send error:', error)
+    throw new Error(error.message || 'Resend send failed')
+  }
+  return data
 }
 
 // ✅ Customer — Order Confirmation + Invoice
@@ -135,12 +126,12 @@ const sendOrderConfirmation = async (order, user) => {
         </div>
       </div>`
 
-    const transporter = await getTransporter()
-    await transporter.sendMail({
+    await send({
       from: FROM_ORDERS,
       to: user.email,
       subject: `✅ Invoice & Order Confirmed — #${order.id?.slice(0,8).toUpperCase()} | MobiMart`,
-      html
+      html,
+      replyTo: SUPPORT_EMAIL,
     })
     console.log('Order confirmation email sent to:', user.email)
   } catch (error) {
@@ -193,12 +184,12 @@ const sendStatusUpdate = async (order, user, newStatus) => {
         </div>
       </div>`
 
-    const transporter = await getTransporter()
-    await transporter.sendMail({
+    await send({
       from: FROM_ORDERS,
       to: user.email,
       subject: `${info.emoji} Order ${newStatus} — #${order.id?.slice(0,8).toUpperCase()} | MobiMart`,
-      html
+      html,
+      replyTo: SUPPORT_EMAIL,
     })
     console.log('Status update email sent to:', user.email)
   } catch (error) {
@@ -291,12 +282,12 @@ const sendVendorOrderNotification = async (vendorEmail, vendorStoreName, order, 
         </div>
       </div>`
 
-    const transporter = await getTransporter()
-    await transporter.sendMail({
+    await send({
       from: FROM_ORDERS,
       to: vendorEmail,
       subject: `🛒 New Order #${order.id?.slice(0,8).toUpperCase()} — Prepare for Dispatch | MobiMart`,
-      html
+      html,
+      replyTo: SUPPORT_EMAIL,
     })
     console.log('Vendor order notification sent to:', vendorEmail)
   } catch (error) {
@@ -340,12 +331,12 @@ const sendVendorStatusEmail = async (email, name, storeName, status, note) => {
         </div>
       </div>`
 
-    const transporter = await getTransporter()
-    await transporter.sendMail({
+    await send({
       from: FROM_SUPPORT,
       to: email,
       subject,
-      html
+      html,
+      replyTo: SUPPORT_EMAIL,
     })
     console.log('Vendor status email sent to:', email)
   } catch (error) {
