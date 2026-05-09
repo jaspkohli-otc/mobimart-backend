@@ -8,6 +8,12 @@ const transporter = nodemailer.createTransport({
   }
 })
 
+// From-address helpers — fall back to EMAIL_USER if a specific FROM isn't set
+const FROM_NOREPLY = process.env.EMAIL_FROM_NOREPLY || `"MobiMart" <${process.env.EMAIL_USER}>`
+const FROM_ORDERS  = process.env.EMAIL_FROM_ORDERS  || `"MobiMart Orders" <${process.env.EMAIL_USER}>`
+const FROM_SUPPORT = process.env.EMAIL_FROM_SUPPORT || `"MobiMart Support" <${process.env.EMAIL_USER}>`
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@jasprmarket.com'
+
 // ✅ Customer — Order Confirmation + Invoice
 const sendOrderConfirmation = async (order, user) => {
   try {
@@ -100,7 +106,7 @@ const sendOrderConfirmation = async (order, user) => {
       </div>`
 
     await transporter.sendMail({
-      from: `"MobiMart Qatar" <${process.env.EMAIL_USER}>`,
+      from: FROM_ORDERS,
       to: user.email,
       subject: `✅ Invoice & Order Confirmed — #${order.id?.slice(0,8).toUpperCase()} | MobiMart`,
       html
@@ -116,7 +122,7 @@ const sendStatusUpdate = async (order, user, newStatus) => {
   try {
     const statusInfo = {
       CONFIRMED: { emoji: '✅', color: '#3b82f6', message: 'Your order has been confirmed and is being prepared.' },
-      SHIPPED: { emoji: '🚚', color: '#8b5cf6', message: 'Your order is on its way! Expect delivery soon.' },
+      SHIPPED:   { emoji: '🚚', color: '#8b5cf6', message: 'Your order is on its way! Expect delivery soon.' },
       DELIVERED: { emoji: '🎉', color: '#10b981', message: 'Your order has been delivered. Enjoy your purchase!' },
       CANCELLED: { emoji: '❌', color: '#ef4444', message: 'Your order has been cancelled. Contact us for support.' }
     }
@@ -157,7 +163,7 @@ const sendStatusUpdate = async (order, user, newStatus) => {
       </div>`
 
     await transporter.sendMail({
-      from: `"MobiMart Qatar" <${process.env.EMAIL_USER}>`,
+      from: FROM_ORDERS,
       to: user.email,
       subject: `${info.emoji} Order ${newStatus} — #${order.id?.slice(0,8).toUpperCase()} | MobiMart`,
       html
@@ -254,7 +260,7 @@ const sendVendorOrderNotification = async (vendorEmail, vendorStoreName, order, 
       </div>`
 
     await transporter.sendMail({
-      from: `"MobiMart Qatar" <${process.env.EMAIL_USER}>`,
+      from: FROM_ORDERS,
       to: vendorEmail,
       subject: `🛒 New Order #${order.id?.slice(0,8).toUpperCase()} — Prepare for Dispatch | MobiMart`,
       html
@@ -292,17 +298,17 @@ const sendVendorStatusEmail = async (email, name, storeName, status, note) => {
                 • Annual Renewal: QAR 500/year
               </p>
             </div>
-            <a href="https://mobimart-frontend-app.vercel.app/vendor" style="display:inline-block;background:#f97316;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold;">Go to My Store →</a>
+            <a href="https://www.jasprmarket.com/vendor" style="display:inline-block;background:#f97316;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold;">Go to My Store →</a>
           ` : `
             <p>Your store <strong>${storeName}</strong> registration has been <span style="color:#ef4444;font-weight:bold;">not approved</span> at this time.</p>
             ${note ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin:20px 0;color:#991b1b;"><p style="margin:0;font-weight:600;">Reason:</p><p style="margin:8px 0 0;">${note}</p></div>` : ''}
-            <p>For queries contact: <a href="mailto:mobimartqatar@gmail.com">mobimartqatar@gmail.com</a></p>
+            <p>For queries contact: <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a></p>
           `}
         </div>
       </div>`
 
     await transporter.sendMail({
-      from: `"MobiMart" <${process.env.EMAIL_USER}>`,
+      from: FROM_SUPPORT,
       to: email,
       subject,
       html
