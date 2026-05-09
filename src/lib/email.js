@@ -1,20 +1,38 @@
 const nodemailer = require('nodemailer')
 
+const dns = require('dns').promises
+
+// Resolve smtp.gmail.com to an IPv4 address at startup
+let smtpHost = 'smtp.gmail.com'
+dns.resolve4('smtp.gmail.com')
+  .then(ips => {
+    if (ips && ips.length > 0) {
+      smtpHost = ips[0]
+      console.log('SMTP host resolved to IPv4:', smtpHost)
+    }
+  })
+  .catch(err => console.error('SMTP IPv4 resolution failed:', err.message))
+
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 587,
-  secure: false,    // STARTTLS on 587
+  secure: false,
   requireTLS: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
   },
-  // Force IPv4 — Railway containers don't reliably support outbound IPv6
   family: 4,
-  // Reasonable timeouts so failures surface fast
   connectionTimeout: 10000,
   greetingTimeout: 10000,
-  socketTimeout: 15000
+  socketTimeout: 15000,
+  // Override DNS lookup to force IPv4
+  tls: {
+    servername: 'smtp.gmail.com'  // Keep TLS hostname check correct
+  },
+  lookup: (hostname, options, callback) => {
+    require('dns').lookup(hostname, { ...options, family: 4 }, callback)
+  }
 })
 
 // From-address helpers — fall back to EMAIL_USER if a specific FROM isn't set
