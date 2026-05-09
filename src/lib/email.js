@@ -1,11 +1,20 @@
 const nodemailer = require('nodemailer')
 
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false,    // STARTTLS on 587
+  requireTLS: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
-  }
+  },
+  // Force IPv4 — Railway containers don't reliably support outbound IPv6
+  family: 4,
+  // Reasonable timeouts so failures surface fast
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000
 })
 
 // From-address helpers — fall back to EMAIL_USER if a specific FROM isn't set
