@@ -1,45 +1,48 @@
 const nodemailer = require('nodemailer')
-
-const dns = require('dns').promises
-
-// Resolve smtp.gmail.com to an IPv4 address at startup
-let smtpHost = 'smtp.gmail.com'
-dns.resolve4('smtp.gmail.com')
-  .then(ips => {
-    if (ips && ips.length > 0) {
-      smtpHost = ips[0]
-      console.log('SMTP host resolved to IPv4:', smtpHost)
-    }
-  })
-  .catch(err => console.error('SMTP IPv4 resolution failed:', err.message))
-
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
-  requireTLS: true,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  },
-  family: 4,
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 15000,
-  // Override DNS lookup to force IPv4
-  tls: {
-    servername: 'smtp.gmail.com'  // Keep TLS hostname check correct
-  },
-  lookup: (hostname, options, callback) => {
-    require('dns').lookup(hostname, { ...options, family: 4 }, callback)
-  }
-})
+const dns = require('dns')
 
 // From-address helpers — fall back to EMAIL_USER if a specific FROM isn't set
 const FROM_NOREPLY = process.env.EMAIL_FROM_NOREPLY || `"MobiMart" <${process.env.EMAIL_USER}>`
 const FROM_ORDERS  = process.env.EMAIL_FROM_ORDERS  || `"MobiMart Orders" <${process.env.EMAIL_USER}>`
 const FROM_SUPPORT = process.env.EMAIL_FROM_SUPPORT || `"MobiMart Support" <${process.env.EMAIL_USER}>`
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@jasprmarket.com'
+
+// Lazy-create the transporter with a resolved IPv4 host
+// (Railway containers don't reliably support outbound IPv6, so we bypass
+//  Node's DNS resolver and pass an IPv4 IP directly to nodemailer.)
+let _transporter = null
+
+async function getTransporter() {
+  if (_transporter) return _transporter
+
+  const ipv4 = await new Promise((resolve, reject) => {
+    dns.resolve4('smtp.gmail.com', (err, addrs) => {
+      if (err || !addrs?.length) return reject(err || new Error('No IPv4 addresses returned'))
+      resolve(addrs[0])
+    })
+  })
+
+  console.log('Creating SMTP transporter with IPv4 host:', ipv4)
+
+  _transporter = nodemailer.createTransport({
+    host: ipv4,
+    port: 587,
+    secure: false,
+    requireTLS: true,
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    },
+    tls: {
+      servername: 'smtp.gmail.com' // TLS validates against hostname, not IP
+    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000
+  })
+
+  return _transporter
+}
 
 // ✅ Customer — Order Confirmation + Invoice
 const sendOrderConfirmation = async (order, user) => {
@@ -132,6 +135,7 @@ const sendOrderConfirmation = async (order, user) => {
         </div>
       </div>`
 
+    const transporter = await getTransporter()
     await transporter.sendMail({
       from: FROM_ORDERS,
       to: user.email,
@@ -189,6 +193,7 @@ const sendStatusUpdate = async (order, user, newStatus) => {
         </div>
       </div>`
 
+    const transporter = await getTransporter()
     await transporter.sendMail({
       from: FROM_ORDERS,
       to: user.email,
@@ -286,6 +291,7 @@ const sendVendorOrderNotification = async (vendorEmail, vendorStoreName, order, 
         </div>
       </div>`
 
+    const transporter = await getTransporter()
     await transporter.sendMail({
       from: FROM_ORDERS,
       to: vendorEmail,
@@ -334,6 +340,7 @@ const sendVendorStatusEmail = async (email, name, storeName, status, note) => {
         </div>
       </div>`
 
+    const transporter = await getTransporter()
     await transporter.sendMail({
       from: FROM_SUPPORT,
       to: email,
