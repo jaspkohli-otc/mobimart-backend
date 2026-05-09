@@ -35,8 +35,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }))
 
-// Handle preflight for all routes (needed for PUT/PATCH/DELETE with auth)
-app.options('*', cors())
+
 
 app.use(express.json())
 
