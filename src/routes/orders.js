@@ -3,7 +3,7 @@ const router = express.Router()
 const {
   placeOrder, getMyOrders, getOrder,
   getAllOrders, updateOrderStatus, getStats,
-  getAllUsers, getAllVendorsAdmin
+  getAllUsers, getAllVendorsAdmin, updateUserApprovalStatus
 } = require('../controllers/orderController')
 const { authenticate, requireAdmin } = require('../middleware/auth')
 
@@ -12,6 +12,12 @@ router.get('/admin/stats', authenticate, requireAdmin, getStats)
 router.get('/admin/all-orders', authenticate, requireAdmin, getAllOrders)
 router.get('/admin/users', authenticate, requireAdmin, getAllUsers)
 router.get('/admin/vendors', authenticate, requireAdmin, getAllVendorsAdmin)
+router.put(
+  '/admin/users/:id/status',
+  authenticate,
+  requireAdmin,
+  updateUserApprovalStatus
+)
 
 // Customer routes
 router.post('/', authenticate, placeOrder)

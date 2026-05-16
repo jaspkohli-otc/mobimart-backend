@@ -52,12 +52,18 @@ enum DocumentStatus {
   REJECTED
 }
 
+enum ApprovalStatus {
+  PENDING
+  ACTIVE
+  BLOCKED
+}
 model User {
   id           String     @id @default(uuid())
   name         String
   email        String     @unique
   passwordHash String
   role         Role       @default(CUSTOMER)
+  approvalStatus ApprovalStatus @default(PENDING)
   phone        String?
   createdAt    DateTime   @default(now())
 
@@ -82,7 +88,20 @@ model Vendor {
   accountHolderName   String?
   accountNumber       String?
   bankBranch          String?
+  subscriptionStatus String @default("PENDING")
+  subscriptionPlan   String?
+  subscriptionExpiry DateTime?
   createdAt           DateTime      @default(now())
+
+enrollmentPaid Boolean @default(false)
+monthlyFeePaid Boolean @default(false)
+annualRenewalPaid Boolean @default(false)
+
+monthlyFeeDueDate DateTime?
+annualRenewalDueDate DateTime?
+
+subscriptionDiscountPercent Int @default(0)
+subscriptionDiscountReason  String?
 
   user           User             @relation(fields: [userId], references: [id])
   products       Product[]
@@ -132,9 +151,17 @@ model Product {
   id          String           @id @default(uuid())
   vendorId    String
   categoryId  String?
-  name        String
-  description String
-  price       Float
+name                 String
+description          String
+vendorSKU            String?
+brand                String?
+model                String?
+warranty             String?
+deliveryOption       String?
+codEligible          Boolean @default(false)
+freeDeliveryEligible Boolean @default(false)
+compareAtPrice       Float?
+price                Float
   stockQty    Int              @default(0)
   images      Json             @default("[]")
   isActive    Boolean          @default(true)

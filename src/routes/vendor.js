@@ -5,7 +5,9 @@ const {
   uploadImage, bulkUpload, upload,
   getMyEarnings, updateIban, updateBankDetails,
   getAdminPayouts, markPayoutPaid,
-  updateVendorStatus, addSubscription
+  updateVendorStatus, addSubscription,
+  updateVendorSubscription,
+  updateVendorFees
 } = require('../controllers/vendorController')
 const {
   upload: docUpload,
@@ -46,6 +48,8 @@ router.post('/admin/status', authenticate, requireAdmin, updateVendorStatus)
 
 // ✅ Admin — subscription
 router.post('/admin/subscription', authenticate, requireAdmin, addSubscription)
+router.put('/admin/subscription/:vendorId', authenticate, requireAdmin, updateVendorSubscription)
+router.put('/admin/fees/:vendorId', authenticate, requireAdmin, updateVendorFees)
 
 // ✅ Admin — KYC documents
 router.get('/admin/documents', authenticate, requireAdmin, getAllDocuments)

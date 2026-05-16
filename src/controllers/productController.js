@@ -5,6 +5,17 @@ const addProduct = async (req, res) => {
     const { name, description, price, stockQty, categoryId, images, condition } = req.body
     const vendor = await prisma.vendor.findUnique({ where: { userId: req.userId } })
     if (!vendor) return res.status(403).json({ error: 'You need a store first' })
+      if (vendor.status !== 'APPROVED') {
+  return res.status(403).json({
+    error: 'Vendor approval required'
+  })
+}
+
+if (vendor.subscriptionStatus !== 'ACTIVE') {
+  return res.status(403).json({
+    error: 'Active subscription required'
+  })
+}
     const product = await prisma.product.create({
       data: {
         vendorId: vendor.id,

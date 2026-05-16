@@ -5,6 +5,16 @@ const placeOrder = async (req, res) => {
   try {
     const { shippingAddress } = req.body
 
+    const user = await prisma.user.findUnique({
+  where: { id: req.userId }
+})
+
+if (!user || user.approvalStatus !== 'ACTIVE') {
+  return res.status(403).json({
+    error: 'Your account is not approved to place orders'
+  })
+}
+
     const cartItems = await prisma.cartItem.findMany({
       where: { userId: req.userId },
       include: { product: { include: { vendor: true } } }
@@ -217,12 +227,28 @@ const getStats = async (req, res) => {
 const getAllUsers = async (req, res) => {
   try {
     const users = await prisma.user.findMany({
-      select: { id: true, name: true, email: true, role: true, phone: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, approvalStatus: true, phone: true, createdAt: true },
       orderBy: { createdAt: 'desc' }
     })
     res.json(users)
   } catch (error) {
     res.status(500).json({ error: 'Something went wrong' })
+  }
+}
+
+const updateUserApprovalStatus = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { approvalStatus } = req.body
+
+    const user = await prisma.user.update({
+      where: { id },
+      data: { approvalStatus }
+    })
+
+    res.json(user)
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update user status' })
   }
 }
 
@@ -242,6 +268,7 @@ const getAllVendorsAdmin = async (req, res) => {
 }
 
 module.exports = {
+  updateUserApprovalStatus,
   placeOrder, getMyOrders, getOrder,
   getAllOrders, updateOrderStatus, getStats,
   getAllUsers, getAllVendorsAdmin

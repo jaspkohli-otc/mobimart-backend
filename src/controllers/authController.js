@@ -28,16 +28,45 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body
+
     const user = await prisma.user.findUnique({ where: { email } })
-    if (!user) return res.status(400).json({ error: 'Invalid credentials' })
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid credentials' })
+    }
+
     const valid = await bcrypt.compare(password, user.passwordHash)
-    if (!valid) return res.status(400).json({ error: 'Invalid credentials' })
+    if (!valid) {
+      return res.status(400).json({ error: 'Invalid credentials' })
+    }
+
+    if (user.approvalStatus === 'PENDING') {
+      return res.status(403).json({
+        error: 'Your account is pending admin approval'
+      })
+    }
+
+    if (user.approvalStatus === 'BLOCKED') {
+      return res.status(403).json({
+        error: 'Your account has been blocked'
+      })
+    }
+
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     )
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } })
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        approvalStatus: user.approvalStatus
+      }
+    })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
