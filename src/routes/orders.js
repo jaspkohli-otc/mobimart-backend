@@ -3,7 +3,8 @@ const router = express.Router()
 const {
   placeOrder, getMyOrders, getOrder,
   getAllOrders, updateOrderStatus, getStats,
-  getAllUsers, getAllVendorsAdmin, updateUserApprovalStatus
+  getAllUsers, getAllVendorsAdmin, updateUserApprovalStatus,
+  getMyVendorOrders
 } = require('../controllers/orderController')
 const { authenticate, requireAdmin } = require('../middleware/auth')
 
@@ -18,6 +19,9 @@ router.put(
   requireAdmin,
   updateUserApprovalStatus
 )
+
+// Vendor — orders containing this vendor's products (must be before /:id)
+router.get('/vendor-orders', authenticate, getMyVendorOrders)
 
 // Customer routes
 router.post('/', authenticate, placeOrder)

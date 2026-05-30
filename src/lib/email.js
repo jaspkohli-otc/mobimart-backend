@@ -1,5 +1,26 @@
 const { Resend } = require('resend')
 
+// Format a shipping address into readable lines. Handles both the new Qatari
+// format (zone/street/building/unit) and older orders that only had street/city.
+function formatAddressLines(a) {
+  if (!a) return { line1: '', line2: '', instructions: '' }
+  const parts = [
+    a.zone ? `Zone ${a.zone}` : null,
+    a.street ? `Street ${a.street}` : null,
+    a.building ? `Building ${a.building}` : null,
+    a.unit ? `Unit ${a.unit}` : null
+  ].filter(Boolean)
+  // If none of the new fields exist, fall back to the old single street string.
+  const line1 = parts.length ? parts.join(', ') : (a.street || '')
+  const line2 = [a.city, a.country].filter(Boolean).join(', ')
+  const instr = []
+  if (a.preferredTime && a.preferredTime !== 'any') instr.push(`Preferred time: ${a.preferredTime}`)
+  if (a.altPhone) instr.push(`Alt. contact: ${a.altPhone}`)
+  if (a.receiverName) instr.push(`Receiver: ${a.receiverName}`)
+  if (a.deliveryNotes) instr.push(`Notes: ${a.deliveryNotes}`)
+  return { line1, line2, instructions: instr.join(' • ') }
+}
+
 // Lazy-initialised Resend client — only fails at first send, not at server boot,
 // in case RESEND_API_KEY isn't set yet.
 let _resend = null
@@ -81,8 +102,10 @@ const sendOrderConfirmation = async (order, user) => {
               <td style="width:48%;background:#f8f9fa;border-radius:10px;padding:16px;vertical-align:top">
                 <p style="margin:0 0 8px;font-weight:700;color:#1e3a5f;font-size:12px;letter-spacing:1px">SHIP TO</p>
                 <p style="margin:0 0 4px;color:#555;font-size:14px"><strong>${order.shippingAddress?.name || user.name}</strong></p>
-                <p style="margin:0 0 4px;color:#666;font-size:13px">${order.shippingAddress?.street}</p>
-                <p style="margin:0;color:#666;font-size:13px">${order.shippingAddress?.city}, ${order.shippingAddress?.country}</p>
+                <p style="margin:0 0 4px;color:#666;font-size:13px">${formatAddressLines(order.shippingAddress).line1}</p>
+                <p style="margin:0 0 4px;color:#666;font-size:13px">${formatAddressLines(order.shippingAddress).line2}</p>
+                ${order.shippingAddress?.phone ? `<p style="margin:0;color:#666;font-size:13px">📞 ${order.shippingAddress.phone}</p>` : ''}
+                ${formatAddressLines(order.shippingAddress).instructions ? `<p style="margin:6px 0 0;color:#92400e;font-size:12px">📦 ${formatAddressLines(order.shippingAddress).instructions}</p>` : ''}
               </td>
             </tr>
           </table>
@@ -167,7 +190,7 @@ const sendStatusUpdate = async (order, user, newStatus) => {
           <div style="background:#f8f9fa;border-radius:12px;padding:20px;margin:20px 0">
             <p style="margin:0 0 8px"><strong>Order ID:</strong> <span style="font-family:monospace;color:#666">${order.id?.slice(0,8).toUpperCase()}</span></p>
             <p style="margin:0 0 8px"><strong>Total:</strong> <span style="color:#f97316;font-weight:600">QAR ${order.totalAmount}</span></p>
-            <p style="margin:0"><strong>Delivery to:</strong> ${order.shippingAddress?.street}, ${order.shippingAddress?.city}</p>
+            <p style="margin:0"><strong>Delivery to:</strong> ${formatAddressLines(order.shippingAddress).line1}, ${formatAddressLines(order.shippingAddress).line2}</p>
           </div>
           ${newStatus === 'DELIVERED' ? `
           <div style="margin-top:20px;padding:20px;background:#d1fae5;border-radius:12px;border-left:4px solid #10b981">
@@ -260,9 +283,10 @@ const sendVendorOrderNotification = async (vendorEmail, vendorStoreName, order, 
           <h3 style="color:#1e3a5f;margin:0 0 12px">🚚 Ship To (Customer Delivery Address)</h3>
           <div style="background:#f8f9fa;border-radius:10px;padding:20px;margin-bottom:24px;border-left:4px solid #1e3a5f">
             <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#1e3a5f">${addr?.name || 'Customer'}</p>
-            <p style="margin:0 0 4px;color:#555;font-size:14px">📍 ${addr?.street}</p>
-            <p style="margin:0 0 4px;color:#555;font-size:14px">🏙️ ${addr?.city}, ${addr?.country}</p>
-            ${addr?.phone ? `<p style="margin:0;color:#555;font-size:14px">📞 ${addr.phone}</p>` : ''}
+            <p style="margin:0 0 4px;color:#555;font-size:14px">📍 ${formatAddressLines(addr).line1}</p>
+            <p style="margin:0 0 4px;color:#555;font-size:14px">🏙️ ${formatAddressLines(addr).line2}</p>
+            ${addr?.phone ? `<p style="margin:0 0 4px;color:#555;font-size:14px">📞 ${addr.phone}</p>` : ''}
+            ${formatAddressLines(addr).instructions ? `<p style="margin:6px 0 0;color:#92400e;font-size:13px">📦 ${formatAddressLines(addr).instructions}</p>` : ''}
           </div>
 
           <div style="background:#fff7ed;border-radius:10px;padding:16px;border-left:4px solid #f97316;margin-bottom:24px">

@@ -13,13 +13,15 @@ exports.register = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10)
     const user = await prisma.user.create({
       data: { name, email, passwordHash, phone, role: assignedRole }
+      // approvalStatus defaults to PENDING (set in schema) — admin must approve
+      // before the account can log in, add to cart, or place orders.
     })
-    const token = jwt.sign(
-      { userId: user.id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    )
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } })
+    // Do NOT auto-login. Account is PENDING until an admin approves it.
+    res.json({
+      pending: true,
+      message: 'Account created. It is pending admin approval — you will be able to sign in once approved.',
+      user: { id: user.id, name: user.name, email: user.email, role: user.role }
+    })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

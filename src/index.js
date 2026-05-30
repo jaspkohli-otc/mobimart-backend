@@ -10,35 +10,27 @@ const vendorRoutes = require('./routes/vendor')
 const productRoutes = require('./routes/products')
 const cartRoutes = require('./routes/cart')
 const orderRoutes = require('./routes/orders')
+const paymentRoutes = require('./routes/payment')
 
 const app = express()
 const PORT = process.env.PORT || 3000
 
 // CORS configuration — whitelist live domain, Vercel preview, and local dev
 const allowedOrigins = [
-  'https://jasprmarket.com',
   'https://www.jasprmarket.com',
   'https://mobimart-frontend-app.vercel.app',
   'http://localhost:3001',
   'http://localhost:3002',
+  'http://localhost',
+  'capacitor://localhost',
+  'ionic://localhost',
+  'http://10.0.2.2:3000',
 ]
 
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (Postman, curl, server-to-server)
-    if (!origin) return callback(null, true)
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      return callback(null, true)
-    }
-    console.warn(`CORS blocked: ${origin}`)
-    return callback(new Error(`CORS blocked: ${origin}`))
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  origin: true,
+  credentials: true
 }))
-
-
 
 app.use(express.json())
 
@@ -54,6 +46,7 @@ app.use('/api/vendors', vendorRoutes)
 app.use('/api/products', productRoutes)
 app.use('/api/cart', cartRoutes)
 app.use('/api/orders', orderRoutes)
+app.use('/api/payments', paymentRoutes)
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`)

@@ -3,7 +3,13 @@ const prisma = require('../lib/prisma')
 
 const placeOrder = async (req, res) => {
   try {
-    const { shippingAddress } = req.body
+    const { shippingAddress, paymentMethod } = req.body
+    // COD orders are accepted immediately (CONFIRMED); card orders stay
+    // PENDING until the MyFatoorah payment is verified, which flips them to
+    // CONFIRMED. We also stash the payment method on the address JSON so the
+    // order page can show "Cash on Delivery" vs "Paid".
+    const method = paymentMethod === 'card' ? 'card' : 'cod'
+    const addressWithMeta = { ...(shippingAddress || {}), paymentMethod: method }
 
     const user = await prisma.user.findUnique({
   where: { id: req.userId }
@@ -30,7 +36,8 @@ if (!user || user.approvalStatus !== 'ACTIVE') {
       data: {
         userId: req.userId,
         totalAmount: parseFloat(totalAmount.toFixed(2)),
-        shippingAddress,
+        status: method === 'cod' ? 'CONFIRMED' : 'PENDING',
+        shippingAddress: addressWithMeta,
         orderItems: {
           create: cartItems.map(item => {
             const lineTotal = item.product.price * item.quantity
@@ -62,7 +69,7 @@ if (!user || user.approvalStatus !== 'ACTIVE') {
 
     // ✅ Email customer invoice
     const userForEmail = await prisma.user.findUnique({ where: { id: req.userId } })
-    sendOrderConfirmation({ ...order, shippingAddress }, userForEmail)
+    sendOrderConfirmation({ ...order, shippingAddress: addressWithMeta }, userForEmail)
 
     // ✅ Email each vendor their items + dispatch info
     const vendorMap = {}
@@ -81,7 +88,7 @@ if (!user || user.approvalStatus !== 'ACTIVE') {
         sendVendorOrderNotification(
           vendorRecord.user.email,
           vendorRecord.storeName,
-          { ...order, shippingAddress },
+          { ...order, shippingAddress: addressWithMeta },
           items
         )
       }
@@ -267,9 +274,55 @@ const getAllVendorsAdmin = async (req, res) => {
   }
 }
 
+// Orders that contain at least one product belonging to the logged-in vendor.
+// Returns each order with only THIS vendor's items (so vendors don't see other
+// vendors' lines in a shared order).
+const getMyVendorOrders = async (req, res) => {
+  try {
+    const vendor = await prisma.vendor.findUnique({ where: { userId: req.userId } })
+    if (!vendor) return res.status(404).json({ error: 'Vendor profile not found' })
+
+    const orders = await prisma.order.findMany({
+      where: { orderItems: { some: { vendorId: vendor.id } } },
+      include: {
+        user: { select: { name: true, phone: true } },
+        orderItems: {
+          where: { vendorId: vendor.id },
+          include: { product: { select: { name: true } } }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    })
+
+    // Shape a lightweight payload for the vendor dashboard
+    const result = orders.map(o => ({
+      id: o.id,
+      status: o.status,
+      createdAt: o.createdAt,
+      customerName: o.user?.name || 'Customer',
+      paymentMethod: (o.shippingAddress && o.shippingAddress.paymentMethod) || 'cod',
+      paid: !!o.paymentRef,
+      shippingAddress: o.shippingAddress,
+      items: o.orderItems.map(it => ({
+        name: it.product?.name,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        vendorEarning: it.vendorEarning
+      })),
+      vendorTotal: o.orderItems.reduce((s, it) => s + (it.unitPrice * it.quantity), 0)
+    }))
+
+    res.json(result)
+  } catch (error) {
+    console.error('getMyVendorOrders error:', error.message)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+}
+
 module.exports = {
   updateUserApprovalStatus,
   placeOrder, getMyOrders, getOrder,
   getAllOrders, updateOrderStatus, getStats,
-  getAllUsers, getAllVendorsAdmin
+  getAllUsers, getAllVendorsAdmin,
+  getMyVendorOrders
 }
