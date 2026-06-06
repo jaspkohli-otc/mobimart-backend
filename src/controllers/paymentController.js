@@ -12,23 +12,16 @@ const mf = () => axios.create({
 })
 
 // ── Callback URLs ────────────────────────────────────────────────
-// On Android the deep link scheme com.jasprmarket.app:// causes Android
-// to close the browser and reopen the app automatically — exactly like
-// Noon / Careem. The App plugin listener in App.js then handles it.
-// On web (browser / PWA) we fall back to the HTTPS pages on the live site.
-const DEEP_LINK_SUCCESS = 'com.jasprmarket.app://payment-success'
-const DEEP_LINK_FAILED  = 'com.jasprmarket.app://payment-failed'
-const WEB_SUCCESS = process.env.FRONTEND_URL
+// MyFatoorah only accepts http:// or https:// URLs for callbacks.
+// We use the live HTTPS pages on jasprmarket.com.
+// After payment the website verifies the payment, then the customer
+// taps "Check Payment Status" or the app auto-detects via polling.
+const CALLBACK_SUCCESS = process.env.FRONTEND_URL
   ? `${process.env.FRONTEND_URL}/payment-success`
   : 'https://www.jasprmarket.com/payment-success'
-const WEB_FAILED  = process.env.FRONTEND_URL
+const CALLBACK_FAILED = process.env.FRONTEND_URL
   ? `${process.env.FRONTEND_URL}/payment-failed`
   : 'https://www.jasprmarket.com/payment-failed'
-
-// Use deep links as the primary callbacks — MyFatoorah supports custom schemes.
-// If you ever need web fallback, swap these to WEB_SUCCESS / WEB_FAILED.
-const CALLBACK_SUCCESS = DEEP_LINK_SUCCESS
-const CALLBACK_FAILED  = DEEP_LINK_FAILED
 
 // ============================================================
 // 1. CREATE VENDOR SUBSCRIPTION PAYMENT
