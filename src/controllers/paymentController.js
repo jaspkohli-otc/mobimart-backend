@@ -11,14 +11,27 @@ const mf = () => axios.create({
   }
 })
 
-// Where MyFatoorah sends the user back after payment. These point to the
-// FRONTEND callback pages (port 3001), which then call /payment/verify.
-const FRONTEND = process.env.FRONTEND_URL || 'http://localhost:3001'
+// ── Callback URLs ────────────────────────────────────────────────
+// On Android the deep link scheme com.jasprmarket.app:// causes Android
+// to close the browser and reopen the app automatically — exactly like
+// Noon / Careem. The App plugin listener in App.js then handles it.
+// On web (browser / PWA) we fall back to the HTTPS pages on the live site.
+const DEEP_LINK_SUCCESS = 'com.jasprmarket.app://payment-success'
+const DEEP_LINK_FAILED  = 'com.jasprmarket.app://payment-failed'
+const WEB_SUCCESS = process.env.FRONTEND_URL
+  ? `${process.env.FRONTEND_URL}/payment-success`
+  : 'https://www.jasprmarket.com/payment-success'
+const WEB_FAILED  = process.env.FRONTEND_URL
+  ? `${process.env.FRONTEND_URL}/payment-failed`
+  : 'https://www.jasprmarket.com/payment-failed'
+
+// Use deep links as the primary callbacks — MyFatoorah supports custom schemes.
+// If you ever need web fallback, swap these to WEB_SUCCESS / WEB_FAILED.
+const CALLBACK_SUCCESS = DEEP_LINK_SUCCESS
+const CALLBACK_FAILED  = DEEP_LINK_FAILED
 
 // ============================================================
 // 1. CREATE VENDOR SUBSCRIPTION PAYMENT
-//    Initiates + executes a MyFatoorah payment, stores a Payment
-//    row (so we can verify later), returns the hosted invoice URL.
 // ============================================================
 const createVendorSubscriptionPayment = async (req, res) => {
   try {
@@ -38,10 +51,7 @@ const createVendorSubscriptionPayment = async (req, res) => {
     if (methods.length === 0) {
       return res.status(502).json({ error: 'No payment methods returned by gateway' })
     }
-    // Pick a method that generates a usable redirect URL.
-    // The first method is often Apple Pay (PaymentMethodCode 'ap'), which does
-    // NOT return a redirect InvoiceURL — it needs embedded/native handling.
-    // Prefer VISA/MASTER ('vm'), then KNET ('kn'), then any non-Apple-Pay method.
+    // Prefer VISA/MASTER over Apple Pay (Apple Pay returns no redirect URL)
     const pick =
       methods.find(m => m.PaymentMethodCode === 'vm') ||
       methods.find(m => m.PaymentMethodCode === 'kn') ||
@@ -49,7 +59,7 @@ const createVendorSubscriptionPayment = async (req, res) => {
       methods[0]
     const paymentMethodId = pick.PaymentMethodId
 
-    // Step 2: pre-create a Payment row so we have an id to reference
+    // Step 2: pre-create a Payment row
     const payment = await prisma.payment.create({
       data: {
         purpose: 'VENDOR_SUBSCRIPTION',
@@ -61,8 +71,7 @@ const createVendorSubscriptionPayment = async (req, res) => {
       }
     })
 
-    // Step 3: ExecutePayment — pass our payment.id as CustomerReference so the
-    // callback can find this row. CallBack/Error point to frontend pages.
+    // Step 3: ExecutePayment — deep link callbacks so Android closes browser and returns to app
     const execute = await client.post('/v2/ExecutePayment', {
       PaymentMethodId: paymentMethodId,
       CustomerName: 'JASPR Vendor',
@@ -71,18 +80,16 @@ const createVendorSubscriptionPayment = async (req, res) => {
       MobileCountryCode: '+965',
       InvoiceValue: amount,
       DisplayCurrencyIso: 'KWD',
-      CallBackUrl: `${FRONTEND}/payment-success`,
-      ErrorUrl: `${FRONTEND}/payment-failed`,
+      CallBackUrl: `${CALLBACK_SUCCESS}?paymentId={PaymentId}&ref=${payment.id}`,
+      ErrorUrl: `${CALLBACK_FAILED}?ref=${payment.id}`,
       Language: 'en',
-      CustomerReference: payment.id   // our own Payment row id
+      CustomerReference: payment.id
     })
 
     const data = execute.data?.Data
     const invoiceId = data?.InvoiceId ? String(data.InvoiceId) : null
-    // MyFatoorah returns the redirect link as PaymentURL (and sometimes InvoiceURL).
     const invoiceUrl = data?.PaymentURL || data?.InvoiceURL
 
-    // Step 4: save the InvoiceId + URL on the Payment row
     await prisma.payment.update({
       where: { id: payment.id },
       data: { invoiceId, invoiceUrl }
@@ -96,11 +103,7 @@ const createVendorSubscriptionPayment = async (req, res) => {
 }
 
 // ============================================================
-// 2. VERIFY PAYMENT (called from the frontend callback page)
-//    MyFatoorah redirects to /payment-success?paymentId=XXXX.
-//    The frontend posts that paymentId here. We call GetPaymentStatus
-//    to CONFIRM the real result (never trust the redirect alone),
-//    update our Payment row, and apply the result (activate sub).
+// 2. VERIFY PAYMENT (called from the app after deep link callback)
 // ============================================================
 const verifyPayment = async (req, res) => {
   try {
@@ -108,7 +111,6 @@ const verifyPayment = async (req, res) => {
     if (!paymentId) return res.status(400).json({ error: 'paymentId is required' })
 
     const client = mf()
-    // Ask MyFatoorah for the authoritative status of this payment.
     const statusResp = await client.post('/v2/GetPaymentStatus', {
       Key: paymentId,
       KeyType: 'PaymentId'
@@ -116,11 +118,11 @@ const verifyPayment = async (req, res) => {
     const d = statusResp.data?.Data
     if (!d) return res.status(502).json({ error: 'No status returned by gateway' })
 
-    const invoiceStatus = d.InvoiceStatus          // "Paid" | "Failed" | "Pending" | ...
-    const customerReference = d.CustomerReference   // our Payment row id
+    const invoiceStatus = d.InvoiceStatus
+    const customerReference = d.CustomerReference
     const invoiceId = d.InvoiceId ? String(d.InvoiceId) : null
 
-    // Find our Payment row (prefer CustomerReference, fall back to invoiceId)
+    // Find our Payment row
     let payment = null
     if (customerReference) {
       payment = await prisma.payment.findUnique({ where: { id: customerReference } }).catch(() => null)
@@ -135,7 +137,6 @@ const verifyPayment = async (req, res) => {
     const isPaid = invoiceStatus === 'Paid'
     const newStatus = isPaid ? 'PAID' : (invoiceStatus === 'Pending' ? 'PENDING' : 'FAILED')
 
-    // Update our Payment row
     await prisma.payment.update({
       where: { id: payment.id },
       data: {
@@ -146,7 +147,7 @@ const verifyPayment = async (req, res) => {
       }
     })
 
-    // Apply the result: if paid and it's a vendor subscription, activate it.
+    // Activate vendor subscription if paid
     if (isPaid && payment.purpose === 'VENDOR_SUBSCRIPTION' && payment.vendorId) {
       const expiry = new Date()
       const type = payment.subscriptionType || 'MONTHLY'
@@ -167,7 +168,6 @@ const verifyPayment = async (req, res) => {
         }
       })
 
-      // Record the subscription transaction
       await prisma.subscription.create({
         data: {
           vendorId: payment.vendorId,
@@ -178,7 +178,7 @@ const verifyPayment = async (req, res) => {
       }).catch(() => {})
     }
 
-    // If paid and it's a customer order, confirm the order + store the ref.
+    // Confirm customer order if paid
     if (isPaid && payment.purpose === 'ORDER' && payment.orderId) {
       await prisma.order.update({
         where: { id: payment.orderId },
@@ -204,25 +204,22 @@ const verifyPayment = async (req, res) => {
 }
 
 // ============================================================
-// 1b. CREATE ORDER PAYMENT (customer checkout, pay by card)
-//     Same MyFatoorah pattern as vendor subscription, but for an
-//     existing order. Stores a Payment row with purpose 'ORDER'.
+// 3. CREATE ORDER PAYMENT (customer checkout)
 // ============================================================
 const createOrderPayment = async (req, res) => {
   try {
     const { orderId } = req.body
     if (!orderId) return res.status(400).json({ error: 'orderId is required' })
 
-    // Look up the order to get its amount and confirm it belongs to the user.
     const order = await prisma.order.findUnique({ where: { id: orderId } })
     if (!order) return res.status(404).json({ error: 'Order not found' })
     if (order.userId !== req.userId) {
       return res.status(403).json({ error: 'Not your order' })
     }
 
-    // NOTE: sandbox is Kuwait/KWD. For QAR go-live, send order.totalAmount and
-    // switch currency to QAR with a Qatar MyFatoorah account.
-    const amount = 5 // KWD test amount in sandbox
+    // NOTE: sandbox uses KWD test amount.
+    // For QAR go-live: use order.totalAmount and switch CurrencyIso to 'QAR'
+    const amount = 5
 
     const client = mf()
     const initiate = await client.post('/v2/InitiatePayment', {
@@ -257,8 +254,9 @@ const createOrderPayment = async (req, res) => {
       MobileCountryCode: '+965',
       InvoiceValue: amount,
       DisplayCurrencyIso: 'KWD',
-      CallBackUrl: `${FRONTEND}/payment-success`,
-      ErrorUrl: `${FRONTEND}/payment-failed`,
+      // Deep link callbacks — Android closes browser and returns to app automatically
+      CallBackUrl: `${CALLBACK_SUCCESS}?paymentId={PaymentId}&ref=${payment.id}&orderId=${orderId}`,
+      ErrorUrl: `${CALLBACK_FAILED}?ref=${payment.id}&orderId=${orderId}`,
       Language: 'en',
       CustomerReference: payment.id
     })
