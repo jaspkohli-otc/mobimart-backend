@@ -73,7 +73,7 @@ const createVendorSubscriptionPayment = async (req, res) => {
       MobileCountryCode: '+965',
       InvoiceValue: amount,
       DisplayCurrencyIso: 'KWD',
-      CallBackUrl: `${CALLBACK_SUCCESS}?paymentId={PaymentId}&ref=${payment.id}`,
+      CallBackUrl: `${CALLBACK_SUCCESS}?ref=${payment.id}`,
       ErrorUrl: `${CALLBACK_FAILED}?ref=${payment.id}`,
       Language: 'en',
       CustomerReference: payment.id
@@ -248,7 +248,7 @@ const createOrderPayment = async (req, res) => {
       InvoiceValue: amount,
       DisplayCurrencyIso: 'KWD',
       // Deep link callbacks — Android closes browser and returns to app automatically
-      CallBackUrl: `${CALLBACK_SUCCESS}?paymentId={PaymentId}&ref=${payment.id}&orderId=${orderId}`,
+      CallBackUrl: `${CALLBACK_SUCCESS}?ref=${payment.id}&orderId=${orderId}`,
       ErrorUrl: `${CALLBACK_FAILED}?ref=${payment.id}&orderId=${orderId}`,
       Language: 'en',
       CustomerReference: payment.id
